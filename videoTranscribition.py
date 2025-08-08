@@ -35,8 +35,8 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 # Константы
 APP_NAME = "Audio/Video Transcription Pro"
 APP_VERSION = "5.3-PROFESSIONAL"
-AUTHOR = "Alarianb"
-DEFAULT_HF_TOKEN = "YOUR TOKEN HERE"
+AUTHOR = "Lebedev Nikolay"
+DEFAULT_HF_TOKEN = "" #ДОБАВЬТЕ СЮДА СВОЙ ТОКЕН HF
 
 # Глобальный мьютекс для безопасности памяти
 MEMORY_MUTEX = QMutex()
