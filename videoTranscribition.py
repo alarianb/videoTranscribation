@@ -1,6 +1,7 @@
 """
 Профессиональная программа транскрибации с диаризацией
 Автор: Lebedev Nikolay
+Версия: 5.4-PROFESSIONAL с поддержкой множественных файлов и Drag&Drop
 """
 
 import sys
@@ -15,7 +16,7 @@ import warnings
 import threading
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
@@ -23,10 +24,11 @@ from PySide6.QtWidgets import (
     QFileDialog, QVBoxLayout, QHBoxLayout, QGroupBox,
     QMessageBox, QStyleFactory, QProgressBar, QComboBox,
     QCheckBox, QSpinBox, QTabWidget, QTextBrowser,
-    QSplitter, QFrame, QStyle, QDialog
+    QSplitter, QFrame, QStyle, QDialog, QListWidget,
+    QListWidgetItem, QAbstractItemView
 )
-from PySide6.QtCore import Qt, QThread, Signal, Slot, QTimer, QPropertyAnimation, QEasingCurve, QMutex, QMutexLocker
-from PySide6.QtGui import QIcon, QFont, QPalette, QColor, QTextCharFormat, QTextCursor, QPixmap
+from PySide6.QtCore import Qt, QThread, Signal, Slot, QTimer, QPropertyAnimation, QEasingCurve, QMutex, QMutexLocker, QMimeData, QUrl
+from PySide6.QtGui import QIcon, QFont, QPalette, QColor, QTextCharFormat, QTextCursor, QPixmap, QDragEnterEvent, QDropEvent
 
 # Отключаем предупреждения
 warnings.filterwarnings("ignore")
@@ -34,9 +36,9 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 # Константы
 APP_NAME = "Audio/Video Transcription Pro"
-APP_VERSION = "5.3-PROFESSIONAL"
+APP_VERSION = "5.4-PROFESSIONAL"
 AUTHOR = "Lebedev Nikolay"
-DEFAULT_HF_TOKEN = "" #ДОБАВЬТЕ СЮДА СВОЙ ТОКЕН HF
+DEFAULT_HF_TOKEN = "" # СЮДА HF ТОКЕН
 
 # Глобальный мьютекс для безопасности памяти
 MEMORY_MUTEX = QMutex()
@@ -72,6 +74,16 @@ except ImportError:
     TORCH_AVAILABLE = False
     DEVICE = "cpu"
     print("PyTorch не установлен - CPU режим")
+
+
+class FileQueueItem:
+    """Элемент очереди файлов"""
+    def __init__(self, path: str):
+        self.path = path
+        self.name = os.path.basename(path)
+        self.size = os.path.getsize(path) / (1024 ** 2)  # MB
+        self.status = "В очереди"
+        self.result = ""
 
 
 class CrashSafeMemoryManager:
@@ -192,7 +204,9 @@ class AboutDialog(QDialog):
             "Профессиональная программа для транскрибации\n"
             "аудио и видео файлов с диаризацией\n"
             "спикеров на базе Whisper AI\n\n"
-            "Надежно, быстро, качественно."
+            "✨ Поддержка множественных файлов\n"
+            "✨ Drag & Drop интерфейс\n"
+            "✨ Пакетная обработка"
         )
         description.setAlignment(Qt.AlignmentFlag.AlignCenter)
         description.setWordWrap(True)
@@ -301,6 +315,76 @@ class LogWidget(QTextBrowser):
         self.setTextCursor(cursor)
 
 
+class FileListWidget(QListWidget):
+    """Виджет списка файлов с поддержкой Drag&Drop"""
+
+    files_dropped = Signal(list)
+
+    def __init__(self):
+        super().__init__()
+        self.setAcceptDrops(True)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.setStyleSheet("""
+            QListWidget {
+                background-color: #1e1e1e;
+                border: 2px dashed #3c3c3c;
+                border-radius: 8px;
+                padding: 10px;
+                font-size: 12px;
+            }
+            QListWidget::item {
+                background-color: #2d2d2d;
+                border: 1px solid #3c3c3c;
+                border-radius: 4px;
+                padding: 8px;
+                margin: 2px;
+                color: #d4d4d4;
+            }
+            QListWidget::item:selected {
+                background-color: #667eea;
+                border-color: #667eea;
+            }
+            QListWidget::item:hover {
+                background-color: #3c3c3c;
+            }
+        """)
+
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        """Обработка входа перетаскивания"""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            self.setStyleSheet(self.styleSheet().replace("border: 2px dashed #3c3c3c", "border: 2px solid #667eea"))
+        else:
+            event.ignore()
+
+    def dragLeaveEvent(self, event):
+        """Обработка выхода перетаскивания"""
+        self.setStyleSheet(self.styleSheet().replace("border: 2px solid #667eea", "border: 2px dashed #3c3c3c"))
+
+    def dropEvent(self, event: QDropEvent):
+        """Обработка сброса файлов"""
+        self.setStyleSheet(self.styleSheet().replace("border: 2px solid #667eea", "border: 2px dashed #3c3c3c"))
+
+        if event.mimeData().hasUrls():
+            files = []
+            for url in event.mimeData().urls():
+                file_path = url.toLocalFile()
+                if os.path.isfile(file_path):
+                    # Проверяем расширение
+                    ext = os.path.splitext(file_path)[1].lower()
+                    supported_formats = ['.mp4', '.mkv', '.avi', '.mov', '.webm', '.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg']
+                    if ext in supported_formats:
+                        files.append(file_path)
+
+            if files:
+                self.files_dropped.emit(files)
+                event.acceptProposedAction()
+            else:
+                event.ignore()
+        else:
+            event.ignore()
+
+
 class ModelDownloader(QThread):
     """Поток для безопасного скачивания моделей"""
 
@@ -376,45 +460,83 @@ class ProfessionalTranscriptionWorker(QThread):
     finished_signal = Signal(str)
     segment_signal = Signal(str)
     stats_signal = Signal(dict)
+    file_completed_signal = Signal(str, str)  # file_path, result
 
-    def __init__(self, file_path, settings):
+    def __init__(self, file_paths: List[str], settings):
         super().__init__()
-        self.file_path = file_path
+        self.file_paths = file_paths if isinstance(file_paths, list) else [file_paths]
         self.settings = settings
         self.temp_dir = None
         self._is_running = True
         self.start_time = None
+        self.current_file_index = 0
 
     def run(self):
-        """Процесс транскрибации с защитой от крашей"""
-        model = None
+        """Процесс транскрибации с защитой от крашей для множественных файлов"""
         try:
             self.start_time = time.time()
-            self.log_signal.emit("Начало транскрибации", "INFO")
+            self.log_signal.emit(f"Начало пакетной транскрибации: {len(self.file_paths)} файлов", "INFO")
 
+            all_results = []
+
+            for index, file_path in enumerate(self.file_paths):
+                if not self._is_running:
+                    break
+
+                self.current_file_index = index
+                file_name = os.path.basename(file_path)
+                self.log_signal.emit(f"[{index+1}/{len(self.file_paths)}] Обработка: {file_name}", "INFO")
+
+                # Обрабатываем один файл
+                result = self.process_single_file(file_path)
+
+                if result:
+                    all_results.append(f"=== {file_name} ===\n{result}\n")
+                    self.file_completed_signal.emit(file_path, result)
+
+                # Очистка памяти между файлами
+                CrashSafeMemoryManager.safe_gpu_cleanup("between files")
+
+                if not self._is_running:
+                    break
+
+            # Объединяем все результаты
+            if all_results:
+                combined_result = "\n\n".join(all_results)
+                self.finished_signal.emit(combined_result)
+                self.log_signal.emit(f"Пакетная транскрибация завершена: {len(all_results)} файлов обработано", "SUCCESS")
+            else:
+                self.finished_signal.emit("Транскрибация не дала результатов")
+
+        except Exception as e:
+            self.log_signal.emit(f"Ошибка пакетной транскрибации: {str(e)}", "ERROR")
+            self.finished_signal.emit(f"Ошибка: {str(e)}")
+        finally:
+            self.cleanup()
+
+    def process_single_file(self, file_path):
+        """Обработка одного файла"""
+        model = None
+        try:
             # Создаем временную директорию
             self.temp_dir = tempfile.TemporaryDirectory()
             output_audio = os.path.join(self.temp_dir.name, "audio.wav")
 
             # Этап 1: Извлечение аудио
-            self.progress_signal.emit(10, "Извлечение аудио...")
-            self.log_signal.emit("Начинаем извлечение аудио", "INFO")
+            base_progress = (self.current_file_index * 100) // len(self.file_paths)
+            step_progress = 100 // len(self.file_paths)
+
+            self.progress_signal.emit(base_progress + step_progress * 10 // 100, f"[{self.current_file_index+1}/{len(self.file_paths)}] Извлечение аудио...")
+            self.extract_audio(file_path, output_audio)
 
             if not self._is_running:
-                return
-
-            self.extract_audio(output_audio)
+                return None
 
             # Предварительная очистка памяти перед загрузкой модели
             CrashSafeMemoryManager.safe_gpu_cleanup("before model loading")
 
             # Этап 2: Загрузка модели
-            self.progress_signal.emit(20, "Загрузка Whisper модели...")
-            self.log_signal.emit(f"Загружаем модель: {self.settings['model_size']} на {DEVICE}", "INFO")
-
-            if not self._is_running:
-                return
-
+            self.progress_signal.emit(base_progress + step_progress * 20 // 100, f"[{self.current_file_index+1}/{len(self.file_paths)}] Загрузка модели...")
             model = self.load_model_safely()
 
             if not self._is_running:
@@ -422,19 +544,10 @@ class ProfessionalTranscriptionWorker(QThread):
                     del model
                     model = None
                     CrashSafeMemoryManager.safe_gpu_cleanup("after early stop")
-                return
+                return None
 
             # Этап 3: Транскрибация
-            self.progress_signal.emit(30, "Распознавание речи...")
-            self.log_signal.emit("Начинаем транскрибацию", "INFO")
-
-            if not self._is_running:
-                if model:
-                    del model
-                    model = None
-                    CrashSafeMemoryManager.safe_gpu_cleanup("after early stop")
-                return
-
+            self.progress_signal.emit(base_progress + step_progress * 30 // 100, f"[{self.current_file_index+1}/{len(self.file_paths)}] Распознавание речи...")
             segments = self.transcribe_audio_safely(output_audio, model)
 
             # Безопасно освобождаем модель
@@ -442,7 +555,6 @@ class ProfessionalTranscriptionWorker(QThread):
                 try:
                     del model
                     model = None
-                    self.log_signal.emit("Модель удалена", "DEBUG")
                 except Exception as model_cleanup_error:
                     self.log_signal.emit(f"Предупреждение при удалении модели: {model_cleanup_error}", "WARNING")
 
@@ -450,22 +562,17 @@ class ProfessionalTranscriptionWorker(QThread):
             CrashSafeMemoryManager.safe_gpu_cleanup("after transcription")
 
             if not self._is_running:
-                return
+                return None
 
             # Проверяем валидность сегментов
             if not segments:
                 self.log_signal.emit("Сегменты не получены, возможно аудио слишком тихое", "WARNING")
-                self.finished_signal.emit("Не удалось получить сегменты из аудио. Проверьте качество записи.")
-                return
+                return "Не удалось получить сегменты из аудио. Проверьте качество записи."
 
             # Этап 4: Диаризация
             formatted_text = ""
             if self.settings.get('use_diarization'):
-                self.progress_signal.emit(70, "Диаризация спикеров...")
-
-                if not self._is_running:
-                    return
-
+                self.progress_signal.emit(base_progress + step_progress * 70 // 100, f"[{self.current_file_index+1}/{len(self.file_paths)}] Диаризация...")
                 formatted_text = self.apply_crash_safe_diarization(segments)
             else:
                 formatted_text = self.format_simple_text_safely(segments)
@@ -475,7 +582,6 @@ class ProfessionalTranscriptionWorker(QThread):
 
             if not formatted_text or formatted_text.strip() == "":
                 formatted_text = "Транскрибация завершена, но результат пуст. Проверьте аудио файл."
-                self.log_signal.emit("Получен пустой результат транскрибации", "WARNING")
 
             # Статистика
             try:
@@ -483,37 +589,23 @@ class ProfessionalTranscriptionWorker(QThread):
             except Exception as stats_error:
                 self.log_signal.emit(f"Ошибка статистики: {stats_error}", "WARNING")
 
-            # Финальная очистка
-            CrashSafeMemoryManager.safe_gpu_cleanup("final cleanup")
+            self.progress_signal.emit(base_progress + step_progress, f"[{self.current_file_index+1}/{len(self.file_paths)}] Готово")
 
-            self.progress_signal.emit(100, "Готово!")
-            self.log_signal.emit("Транскрибация завершена успешно", "SUCCESS")
-            self.finished_signal.emit(formatted_text)
+            return formatted_text
 
         except Exception as e:
-            import traceback
-            error_msg = f"Ошибка транскрибации: {str(e)}"
-            error_trace = traceback.format_exc()
-
-            self.log_signal.emit(error_msg, "ERROR")
-            self.log_signal.emit(f"Детальная трассировка: {error_trace}", "DEBUG")
+            self.log_signal.emit(f"Ошибка обработки файла: {str(e)}", "ERROR")
 
             # Защита от краша при ошибке
             try:
-                self.log_signal.emit("Экстренная очистка памяти...", "WARNING")
                 if model:
                     del model
                     model = None
-
-                # Агрессивная очистка при ошибке
                 CrashSafeMemoryManager.safe_gpu_cleanup("emergency cleanup")
-
-                self.log_signal.emit("Защитная очистка завершена", "INFO")
-
             except Exception as cleanup_critical_error:
                 self.log_signal.emit(f"Критическая ошибка защиты: {cleanup_critical_error}", "ERROR")
 
-            self.finished_signal.emit(f"Ошибка транскрибации: {str(e)}")
+            return f"Ошибка обработки: {str(e)}"
         finally:
             # Гарантированная финальная очистка
             try:
@@ -523,25 +615,14 @@ class ProfessionalTranscriptionWorker(QThread):
             except:
                 pass
 
-            self.cleanup()
+            # Очистка временной директории
+            if self.temp_dir:
+                try:
+                    self.temp_dir.cleanup()
+                except:
+                    pass
 
-    def stop(self):
-        """Остановка процесса"""
-        self._is_running = False
-        self.log_signal.emit("Получен сигнал остановки...", "WARNING")
-
-        # Даем время на корректное завершение
-        try:
-            if self.isRunning():
-                self.quit()
-                if not self.wait(3000):  # Ждем 3 секунды
-                    self.log_signal.emit("Принудительное завершение...", "WARNING")
-                    self.terminate()
-                    self.wait(1000)  # Еще секунда
-        except Exception as e:
-            self.log_signal.emit(f"Ошибка остановки: {e}", "ERROR")
-
-    def extract_audio(self, output_path):
+    def extract_audio(self, input_path, output_path):
         """Извлечение аудио с защитой"""
         ffmpeg_exe = self.find_ffmpeg()
         if not ffmpeg_exe:
@@ -549,7 +630,7 @@ class ProfessionalTranscriptionWorker(QThread):
 
         cmd = [
             ffmpeg_exe, "-y",
-            "-i", self.file_path,
+            "-i", input_path,
             "-vn", "-acodec", "pcm_s16le",
             "-ar", "16000", "-ac", "1",
             "-af", "highpass=f=200,lowpass=f=3000",
@@ -684,9 +765,6 @@ class ProfessionalTranscriptionWorker(QThread):
 
                         total_segments += 1
                         if total_segments % 10 == 0:
-                            progress = min(30 + int(40 * segment.end / (info.duration or 100)), 70)
-                            self.progress_signal.emit(progress, f"Обработано: {total_segments}")
-
                             # Периодическая очистка
                             if total_segments % 50 == 0:
                                 CrashSafeMemoryManager.safe_gpu_cleanup("during transcription")
@@ -926,11 +1004,28 @@ class ProfessionalTranscriptionWorker(QThread):
                 'segments': len(segments),
                 'words': len(text.split()),
                 'chars': len(text),
-                'speed': len(segments) / elapsed if elapsed > 0 else 0
+                'speed': len(segments) / elapsed if elapsed > 0 else 0,
+                'files_count': len(self.file_paths)
             }
             self.stats_signal.emit(stats)
         except Exception as e:
             self.log_signal.emit(f"Ошибка статистики: {e}", "WARNING")
+
+    def stop(self):
+        """Остановка процесса"""
+        self._is_running = False
+        self.log_signal.emit("Получен сигнал остановки...", "WARNING")
+
+        # Даем время на корректное завершение
+        try:
+            if self.isRunning():
+                self.quit()
+                if not self.wait(3000):  # Ждем 3 секунды
+                    self.log_signal.emit("Принудительное завершение...", "WARNING")
+                    self.terminate()
+                    self.wait(1000)  # Еще секунда
+        except Exception as e:
+            self.log_signal.emit(f"Ошибка остановки: {e}", "ERROR")
 
     def cleanup(self):
         """Очистка ресурсов"""
@@ -954,8 +1049,11 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
-        self.setGeometry(100, 100, 1200, 800)
-        self.setMinimumSize(1000, 700)
+        self.setGeometry(100, 100, 1400, 900)
+        self.setMinimumSize(1200, 800)
+
+        # Включаем drag&drop для главного окна
+        self.setAcceptDrops(True)
 
         # Темная тема
         self.setStyleSheet(self.get_dark_theme())
@@ -969,7 +1067,7 @@ class MainWindow(QMainWindow):
             sys.exit(1)
 
         self.init_ui()
-        self.video_file_path = None
+        self.file_queue = []  # Список FileQueueItem
         self.transcription_thread = None
         self.transcribed_text = ""
         self.model_downloader = None
@@ -1004,7 +1102,7 @@ class MainWindow(QMainWindow):
             }
         """)
 
-        author_label = QLabel(f"by {AUTHOR}")
+        author_label = QLabel(f"by {AUTHOR} | 📂 Поддержка множественных файлов | 🎯 Drag & Drop")
         author_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         author_label.setStyleSheet("""
             QLabel {
@@ -1066,36 +1164,107 @@ class MainWindow(QMainWindow):
         # Статус бар
         self.create_status_bar()
 
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        """Обработка входа перетаскивания для главного окна"""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event: QDropEvent):
+        """Обработка сброса файлов на главное окно"""
+        if event.mimeData().hasUrls():
+            files = []
+            for url in event.mimeData().urls():
+                file_path = url.toLocalFile()
+                if os.path.isfile(file_path):
+                    # Проверяем расширение
+                    ext = os.path.splitext(file_path)[1].lower()
+                    supported_formats = ['.mp4', '.mkv', '.avi', '.mov', '.webm', '.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg']
+                    if ext in supported_formats:
+                        files.append(file_path)
+
+            if files:
+                self.add_files_to_queue(files)
+                event.acceptProposedAction()
+            else:
+                event.ignore()
+        else:
+            event.ignore()
+
     def create_transcription_tab(self):
         """Создание вкладки транскрибации"""
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
-        # Выбор файла
-        file_group = QGroupBox("📁 Выбор файла")
-        file_layout = QHBoxLayout()
+        # Выбор файлов
+        file_group = QGroupBox("📁 Выбор файлов")
+        file_layout = QVBoxLayout()
 
-        self.select_file_btn = QPushButton("Выбрать файл")
+        # Кнопки управления файлами
+        file_buttons_layout = QHBoxLayout()
+
+        self.select_file_btn = QPushButton("➕ Добавить файлы")
         self.select_file_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
         self.select_file_btn.setStyleSheet("""
             QPushButton {
                 padding: 8px 16px;
                 font-size: 14px;
                 font-weight: bold;
+                background: #38a169;
+            }
+            QPushButton:hover {
+                background: #2f855a;
             }
         """)
 
-        self.file_label = QLabel("Файл не выбран")
-        self.file_label.setStyleSheet("color: #8b949e; font-style: italic;")
+        self.clear_queue_btn = QPushButton("🗑️ Очистить очередь")
+        self.clear_queue_btn.setStyleSheet("""
+            QPushButton {
+                padding: 8px 16px;
+                font-size: 14px;
+                background: #e53e3e;
+            }
+            QPushButton:hover {
+                background: #c53030;
+            }
+        """)
 
-        file_layout.addWidget(self.select_file_btn)
-        file_layout.addWidget(self.file_label, 1)
+        self.remove_selected_btn = QPushButton("❌ Удалить выбранные")
+        self.remove_selected_btn.setStyleSheet("""
+            QPushButton {
+                padding: 8px 16px;
+                font-size: 14px;
+                background: #ed8936;
+            }
+            QPushButton:hover {
+                background: #dd6b20;
+            }
+        """)
+
+        file_buttons_layout.addWidget(self.select_file_btn)
+        file_buttons_layout.addWidget(self.remove_selected_btn)
+        file_buttons_layout.addWidget(self.clear_queue_btn)
+        file_buttons_layout.addStretch()
+
+        # Список файлов с drag&drop
+        self.file_list_widget = FileListWidget()
+        self.file_list_widget.files_dropped.connect(self.add_files_to_queue)
+
+        # Подсказка для drag&drop
+        drag_drop_hint = QLabel("🎯 Перетащите файлы сюда или используйте кнопку добавления")
+        drag_drop_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        drag_drop_hint.setStyleSheet("color: #8b949e; font-style: italic; padding: 10px;")
+
+        file_layout.addLayout(file_buttons_layout)
+        file_layout.addWidget(drag_drop_hint)
+        file_layout.addWidget(self.file_list_widget)
         file_group.setLayout(file_layout)
 
         # Контролы
         control_layout = QHBoxLayout()
 
-        self.transcribe_btn = QPushButton("НАЧАТЬ ТРАНСКРИБАЦИЮ")
+        self.transcribe_btn = QPushButton("▶️ НАЧАТЬ ТРАНСКРИБАЦИЮ")
         self.transcribe_btn.setEnabled(False)
         self.transcribe_btn.setStyleSheet("""
             QPushButton {
@@ -1205,11 +1374,13 @@ class MainWindow(QMainWindow):
         self.save_txt_btn = self.create_save_button("💾 TXT", "#48bb78")
         self.save_docx_btn = self.create_save_button("📄 DOCX", "#4299e1")
         self.save_json_btn = self.create_save_button("📊 JSON", "#ed8936")
+        self.save_all_btn = self.create_save_button("📦 Сохранить все", "#9f7aea")
 
         save_layout.addStretch()
         save_layout.addWidget(self.save_txt_btn)
         save_layout.addWidget(self.save_docx_btn)
         save_layout.addWidget(self.save_json_btn)
+        save_layout.addWidget(self.save_all_btn)
 
         result_layout.addWidget(self.result_text)
         result_layout.addLayout(save_layout)
@@ -1240,13 +1411,16 @@ class MainWindow(QMainWindow):
         layout.addWidget(splitter)
 
         # Подключение сигналов
-        self.select_file_btn.clicked.connect(self.select_file)
+        self.select_file_btn.clicked.connect(self.select_files)
+        self.clear_queue_btn.clicked.connect(self.clear_file_queue)
+        self.remove_selected_btn.clicked.connect(self.remove_selected_files)
         self.transcribe_btn.clicked.connect(self.start_transcription)
         self.stop_btn.clicked.connect(self.stop_transcription)
         self.download_model_btn.clicked.connect(self.download_model)
         self.save_txt_btn.clicked.connect(lambda: self.save_results('txt'))
         self.save_docx_btn.clicked.connect(lambda: self.save_results('docx'))
         self.save_json_btn.clicked.connect(lambda: self.save_results('json'))
+        self.save_all_btn.clicked.connect(self.save_all_results)
 
         return widget
 
@@ -1404,7 +1578,9 @@ class MainWindow(QMainWindow):
         self.memory_label = QLabel("💾 Память: --")
         self.gpu_label = QLabel("GPU: --")
         self.time_label = QLabel("⏱️ Время: --")
+        self.queue_label = QLabel("📂 Очередь: 0 файлов")
 
+        status_bar.addPermanentWidget(self.queue_label)
         status_bar.addPermanentWidget(self.memory_label)
         status_bar.addPermanentWidget(self.gpu_label)
         status_bar.addPermanentWidget(self.time_label)
@@ -1603,6 +1779,8 @@ class MainWindow(QMainWindow):
             info.append(f"Кэш моделей: {len(models)} файлов")
 
         info.append("Защита от крашей: активна")
+        info.append("Множественные файлы: поддерживается")
+        info.append("Drag & Drop: активен")
 
         self.system_info.setPlainText("\n".join(info))
 
@@ -1649,69 +1827,93 @@ class MainWindow(QMainWindow):
         current_time = datetime.now().strftime("%H:%M:%S")
         self.time_label.setText(f"⏱️ {current_time}")
 
-    def select_file(self):
-        """Выбор файла"""
-        try:
-            # Если есть активная транскрибация, предупреждаем
-            if self.transcription_thread and self.transcription_thread.isRunning():
-                reply = QMessageBox.question(
-                    self,
-                    "Предупреждение",
-                    "Транскрибация в процессе. Остановить и выбрать новый файл?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-                )
-                if reply == QMessageBox.StandardButton.Yes:
-                    self.stop_transcription()
-                    # Ждем завершения
-                    if self.transcription_thread:
-                        self.transcription_thread.wait(3000)  # Ждем до 3 секунд
-                else:
-                    return
+        # Очередь
+        self.queue_label.setText(f"📂 Очередь: {len(self.file_queue)} файлов")
 
-            file_path, _ = QFileDialog.getOpenFileName(
+    def select_files(self):
+        """Выбор файлов (множественный)"""
+        try:
+            file_paths, _ = QFileDialog.getOpenFileNames(
                 self,
-                "Выберите видео или аудио файл",
+                "Выберите видео или аудио файлы",
                 "",
                 "Медиа файлы (*.mp4 *.mkv *.avi *.mov *.webm *.mp3 *.wav *.m4a *.aac *.flac *.ogg);;Все файлы (*.*)"
             )
 
-            if file_path:
-                # ВАЖНО: Полный сброс состояния перед новым файлом
-                self.log_widget.log("Подготовка к новой транскрибации...", "INFO")
-                CrashSafeMemoryManager.reset_for_new_transcription()
-
-                self.video_file_path = file_path
-                file_name = os.path.basename(file_path)
-                file_size = os.path.getsize(file_path) / (1024 ** 2)
-
-                self.file_label.setText(f"{file_name} ({file_size:.1f} MB)")
-                self.file_label.setStyleSheet("color: #58a6ff; font-style: normal;")
-
-                self.log_widget.log(f"Выбран файл: {file_name}", "SUCCESS")
-                self.log_widget.log(f"Размер: {file_size:.1f} MB", "DEBUG")
-
-                # Полная очистка UI
-                self.result_text.clear()
-                self.live_text.clear()
-                self.stats_text.clear()
-                self.transcribed_text = ""
-
-                # Сброс прогресса
-                self.progress_bar.hide()
-                self.status_label.hide()
-
-                # Активация кнопки
-                self.transcribe_btn.setEnabled(True)
-
-                # Деактивация кнопок сохранения
-                for btn in [self.save_txt_btn, self.save_docx_btn, self.save_json_btn]:
-                    btn.setEnabled(False)
-
-                self.log_widget.log("Готов к транскрибации", "SUCCESS")
+            if file_paths:
+                self.add_files_to_queue(file_paths)
 
         except Exception as e:
-            self.log_widget.log(f"Ошибка выбора файла: {e}", "ERROR")
-            QMessageBox.critical(self, "Ошибка", f"Не удалось выбрать файл: {e}")
+            self.log_widget.log(f"Ошибка выбора файлов: {e}", "ERROR")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось выбрать файлы: {e}")
+
+    def add_files_to_queue(self, file_paths):
+        """Добавление файлов в очередь"""
+        added_count = 0
+
+        for file_path in file_paths:
+            # Проверяем, не добавлен ли уже файл
+            if any(item.path == file_path for item in self.file_queue):
+                self.log_widget.log(f"Файл уже в очереди: {os.path.basename(file_path)}", "WARNING")
+                continue
+
+            # Создаем элемент очереди
+            file_item = FileQueueItem(file_path)
+            self.file_queue.append(file_item)
+
+            # Добавляем в список UI
+            list_item = QListWidgetItem(f"📄 {file_item.name} ({file_item.size:.1f} MB)")
+            self.file_list_widget.addItem(list_item)
+
+            self.log_widget.log(f"Добавлен в очередь: {file_item.name}", "SUCCESS")
+            added_count += 1
+
+        if added_count > 0:
+            self.log_widget.log(f"Добавлено файлов: {added_count}", "INFO")
+            self.transcribe_btn.setEnabled(True)
+
+            # Очистка предыдущих результатов
+            self.result_text.clear()
+            self.live_text.clear()
+            self.stats_text.clear()
+
+    def remove_selected_files(self):
+        """Удаление выбранных файлов из очереди"""
+        selected_items = self.file_list_widget.selectedItems()
+
+        if not selected_items:
+            return
+
+        for item in selected_items:
+            row = self.file_list_widget.row(item)
+            self.file_list_widget.takeItem(row)
+
+            # Удаляем из очереди
+            if row < len(self.file_queue):
+                removed_file = self.file_queue.pop(row)
+                self.log_widget.log(f"Удален из очереди: {removed_file.name}", "INFO")
+
+        # Отключаем кнопку транскрибации если очередь пуста
+        if not self.file_queue:
+            self.transcribe_btn.setEnabled(False)
+
+    def clear_file_queue(self):
+        """Очистка всей очереди файлов"""
+        if not self.file_queue:
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Подтверждение",
+            f"Очистить очередь из {len(self.file_queue)} файлов?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self.file_list_widget.clear()
+            self.file_queue.clear()
+            self.transcribe_btn.setEnabled(False)
+            self.log_widget.log("Очередь файлов очищена", "INFO")
 
     def download_model(self):
         """Скачивание модели"""
@@ -1759,28 +1961,18 @@ class MainWindow(QMainWindow):
 
     def start_transcription(self):
         """Запуск транскрибации"""
-        if not self.video_file_path:
-            QMessageBox.warning(self, "Предупреждение", "Сначала выберите файл для транскрибации")
-            return
-
-        # Проверка файла
-        if not os.path.exists(self.video_file_path):
-            QMessageBox.critical(self, "Ошибка", "Выбранный файл не найден")
-            return
-
-        try:
-            file_size = os.path.getsize(self.video_file_path)
-            if file_size == 0:
-                QMessageBox.critical(self, "Ошибка", "Выбранный файл пуст")
-                return
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Не удалось прочитать файл: {e}")
+        if not self.file_queue:
+            QMessageBox.warning(self, "Предупреждение", "Сначала добавьте файлы для транскрибации")
             return
 
         # UI
         self.transcribe_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
         self.download_model_btn.setEnabled(False)
+        self.select_file_btn.setEnabled(False)
+        self.clear_queue_btn.setEnabled(False)
+        self.remove_selected_btn.setEnabled(False)
+
         self.progress_bar.show()
         self.progress_bar.setValue(0)
         self.status_label.show()
@@ -1799,10 +1991,11 @@ class MainWindow(QMainWindow):
             'min_silence': int(self.min_silence_spin.value())
         }
 
+        # Список путей файлов
+        file_paths = [item.path for item in self.file_queue]
+
         self.log_widget.log("=" * 50, "INFO")
-        self.log_widget.log("Начало профессиональной транскрибации", "INFO")
-        self.log_widget.log(f"Файл: {os.path.basename(self.video_file_path)}", "INFO")
-        self.log_widget.log(f"Размер: {file_size / (1024**2):.1f} MB", "INFO")
+        self.log_widget.log(f"Начало пакетной транскрибации: {len(file_paths)} файлов", "INFO")
         self.log_widget.log(f"Настройки: {json.dumps(settings, ensure_ascii=False)}", "DEBUG")
 
         # Мягкая предварительная очистка памяти
@@ -1813,12 +2006,13 @@ class MainWindow(QMainWindow):
 
         # Запуск потока
         try:
-            self.transcription_thread = ProfessionalTranscriptionWorker(self.video_file_path, settings)
+            self.transcription_thread = ProfessionalTranscriptionWorker(file_paths, settings)
             self.transcription_thread.progress_signal.connect(self.on_progress)
             self.transcription_thread.log_signal.connect(self.log_widget.log)
             self.transcription_thread.finished_signal.connect(self.on_finished)
             self.transcription_thread.segment_signal.connect(self.on_segment)
             self.transcription_thread.stats_signal.connect(self.on_stats)
+            self.transcription_thread.file_completed_signal.connect(self.on_file_completed)
             self.transcription_thread.start()
 
             self.log_widget.log("Рабочий поток запущен", "SUCCESS")
@@ -1871,12 +2065,30 @@ class MainWindow(QMainWindow):
         text = f"""
 СТАТИСТИКА ТРАНСКРИБАЦИИ:
 ⏱️ Время обработки: {stats['duration']:.1f} сек
+📂 Файлов обработано: {stats.get('files_count', 1)}
 📝 Сегментов: {stats['segments']}
 💬 Слов: {stats['words']}
 📄 Символов: {stats['chars']}
 ⚡ Скорость: {stats['speed']:.1f} сегм/сек
 """
         self.stats_text.setPlainText(text.strip())
+
+    @Slot(str, str)
+    def on_file_completed(self, file_path, result):
+        """Обработка завершения транскрибации одного файла"""
+        file_name = os.path.basename(file_path)
+        self.log_widget.log(f"Файл обработан: {file_name}", "SUCCESS")
+
+        # Обновляем статус файла в очереди
+        for i, item in enumerate(self.file_queue):
+            if item.path == file_path:
+                item.status = "Готово"
+                item.result = result
+                # Обновляем отображение в списке
+                list_item = self.file_list_widget.item(i)
+                if list_item:
+                    list_item.setText(f"✅ {item.name} ({item.size:.1f} MB) - Готово")
+                break
 
     @Slot(str)
     def on_finished(self, result):
@@ -1887,6 +2099,9 @@ class MainWindow(QMainWindow):
             self.transcribe_btn.setEnabled(True)
             self.stop_btn.setEnabled(False)
             self.download_model_btn.setEnabled(True)
+            self.select_file_btn.setEnabled(True)
+            self.clear_queue_btn.setEnabled(True)
+            self.remove_selected_btn.setEnabled(True)
 
             if result.startswith("Ошибка"):
                 QMessageBox.critical(self, "Ошибка", result)
@@ -1896,7 +2111,7 @@ class MainWindow(QMainWindow):
                 self.result_text.setPlainText(result)
 
                 # Активация кнопок сохранения
-                for btn in [self.save_txt_btn, self.save_docx_btn, self.save_json_btn]:
+                for btn in [self.save_txt_btn, self.save_docx_btn, self.save_json_btn, self.save_all_btn]:
                     btn.setEnabled(True)
 
                 # Скролл к началу
@@ -1904,7 +2119,7 @@ class MainWindow(QMainWindow):
                 cursor.setPosition(0)
                 self.result_text.setTextCursor(cursor)
 
-                self.log_widget.log("Транскрибация завершена успешно", "SUCCESS")
+                self.log_widget.log(f"Транскрибация завершена успешно: {len(self.file_queue)} файлов", "SUCCESS")
                 self.log_widget.log("=" * 50, "INFO")
 
             # ВАЖНО: Очистка потока и состояния
@@ -1937,7 +2152,11 @@ class MainWindow(QMainWindow):
             return
 
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        base_name = Path(self.video_file_path).stem
+
+        if len(self.file_queue) == 1:
+            base_name = Path(self.file_queue[0].path).stem
+        else:
+            base_name = f"batch_{len(self.file_queue)}_files"
 
         if format_type == 'txt':
             file_path, _ = QFileDialog.getSaveFileName(
@@ -1950,7 +2169,7 @@ class MainWindow(QMainWindow):
                 try:
                     with open(file_path, 'w', encoding='utf-8') as f:
                         f.write(f"ПРОФЕССИОНАЛЬНАЯ ТРАНСКРИБАЦИЯ\n")
-                        f.write(f"Файл: {os.path.basename(self.video_file_path)}\n")
+                        f.write(f"Файлов обработано: {len(self.file_queue)}\n")
                         f.write(f"Дата: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
                         f.write(f"Программа: {APP_NAME} v{APP_VERSION}\n")
                         f.write(f"Автор: {AUTHOR}\n")
@@ -1980,7 +2199,9 @@ class MainWindow(QMainWindow):
                     doc.add_heading('ПРОФЕССИОНАЛЬНАЯ ТРАНСКРИБАЦИЯ', 0)
 
                     # Метаданные
-                    doc.add_paragraph(f'Файл: {os.path.basename(self.video_file_path)}')
+                    doc.add_paragraph(f'Файлов обработано: {len(self.file_queue)}')
+                    for item in self.file_queue:
+                        doc.add_paragraph(f'• {item.name} ({item.size:.1f} MB)')
                     doc.add_paragraph(f'Дата: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
                     doc.add_paragraph(f'Программа: {APP_NAME} v{APP_VERSION}')
                     doc.add_paragraph(f'Автор: {AUTHOR}')
@@ -2022,7 +2243,8 @@ class MainWindow(QMainWindow):
                 try:
                     data = {
                         'metadata': {
-                            'file': os.path.basename(self.video_file_path),
+                            'files': [{'name': item.name, 'path': item.path, 'size_mb': item.size} for item in self.file_queue],
+                            'files_count': len(self.file_queue),
                             'date': datetime.now().isoformat(),
                             'program': f"{APP_NAME} v{APP_VERSION}",
                             'author': AUTHOR,
@@ -2031,8 +2253,14 @@ class MainWindow(QMainWindow):
                             'professional_edition': True
                         },
                         'text': self.transcribed_text,
+                        'individual_results': {},
                         'statistics': self.stats_text.toPlainText() if self.stats_text.toPlainText() else None
                     }
+
+                    # Добавляем индивидуальные результаты
+                    for item in self.file_queue:
+                        if item.result:
+                            data['individual_results'][item.name] = item.result
 
                     with open(file_path, 'w', encoding='utf-8') as f:
                         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -2042,6 +2270,70 @@ class MainWindow(QMainWindow):
                 except Exception as e:
                     self.log_widget.log(f"Ошибка сохранения: {e}", "ERROR")
                     QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить: {e}")
+
+    def save_all_results(self):
+        """Сохранение всех результатов по отдельным файлам"""
+        if not self.file_queue or not any(item.result for item in self.file_queue):
+            QMessageBox.warning(self, "Внимание", "Нет результатов для сохранения")
+            return
+
+        folder_path = QFileDialog.getExistingDirectory(
+            self,
+            "Выберите папку для сохранения результатов"
+        )
+
+        if not folder_path:
+            return
+
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        saved_count = 0
+
+        try:
+            for item in self.file_queue:
+                if not item.result:
+                    continue
+
+                base_name = Path(item.path).stem
+
+                # Сохраняем TXT
+                txt_path = os.path.join(folder_path, f"{base_name}_{timestamp}.txt")
+                with open(txt_path, 'w', encoding='utf-8') as f:
+                    f.write(f"ТРАНСКРИБАЦИЯ: {item.name}\n")
+                    f.write(f"Дата: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(f"Размер файла: {item.size:.1f} MB\n")
+                    f.write("=" * 50 + "\n\n")
+                    f.write(item.result)
+
+                saved_count += 1
+                self.log_widget.log(f"Сохранен: {txt_path}", "SUCCESS")
+
+            # Сохраняем общий отчет
+            report_path = os.path.join(folder_path, f"report_{timestamp}.txt")
+            with open(report_path, 'w', encoding='utf-8') as f:
+                f.write(f"ОТЧЕТ О ПАКЕТНОЙ ТРАНСКРИБАЦИИ\n")
+                f.write(f"Программа: {APP_NAME} v{APP_VERSION}\n")
+                f.write(f"Дата: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"Файлов обработано: {len(self.file_queue)}\n")
+                f.write(f"Успешно транскрибировано: {saved_count}\n")
+                f.write("=" * 50 + "\n\n")
+                f.write("СПИСОК ФАЙЛОВ:\n")
+                for item in self.file_queue:
+                    status = "✅ Готово" if item.result else "❌ Ошибка"
+                    f.write(f"{status} - {item.name} ({item.size:.1f} MB)\n")
+
+            self.log_widget.log(f"Сохранен отчет: {report_path}", "SUCCESS")
+
+            QMessageBox.information(
+                self,
+                "Успех",
+                f"Результаты сохранены!\n\n"
+                f"Сохранено файлов: {saved_count}\n"
+                f"Папка: {folder_path}"
+            )
+
+        except Exception as e:
+            self.log_widget.log(f"Ошибка сохранения результатов: {e}", "ERROR")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить результаты: {e}")
 
     def export_logs(self):
         """Экспорт логов"""
@@ -2138,7 +2430,9 @@ def main():
         window.log_widget.log("=" * 50, "INFO")
         window.log_widget.log(f"{APP_NAME} v{APP_VERSION} запущен", "SUCCESS")
         window.log_widget.log(f"Автор: {AUTHOR}", "INFO")
-        window.log_widget.log("Защита от крашей активирована", "INFO")
+        window.log_widget.log("✨ Поддержка множественных файлов активна", "INFO")
+        window.log_widget.log("✨ Drag & Drop активен", "INFO")
+        window.log_widget.log("✨ Защита от крашей активирована", "INFO")
         window.log_widget.log("=" * 50, "INFO")
 
         sys.exit(app.exec())
