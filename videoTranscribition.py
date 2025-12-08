@@ -1,7 +1,7 @@
 """
 Профессиональная программа транскрибации с диаризацией
 Автор: Lebedev Nikolay
-Версия: 5.4-PROFESSIONAL с поддержкой множественных файлов и Drag&Drop
+Версия: 6.0-PROFESSIONAL с улучшенной диаризацией и современным UI
 """
 
 import sys
@@ -36,7 +36,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 # Константы
 APP_NAME = "Audio/Video Transcription Pro"
-APP_VERSION = "5.4-PROFESSIONAL"
+APP_VERSION = "6.0-PROFESSIONAL"
 AUTHOR = "Lebedev Nikolay"
 DEFAULT_HF_TOKEN = "" # СЮДА HF ТОКЕН
 
@@ -257,26 +257,32 @@ class LogWidget(QTextBrowser):
         self.setOpenExternalLinks(False)
         self.setStyleSheet("""
             QTextBrowser {
-                background-color: #1e1e1e;
-                color: #d4d4d4;
-                border: 1px solid #3c3c3c;
-                border-radius: 6px;
-                padding: 8px;
-                font-family: 'Consolas', 'Monaco', monospace;
+                background-color: #0a0a14;
+                color: #e2e8f0;
+                border: 1px solid rgba(102, 126, 234, 0.2);
+                border-radius: 10px;
+                padding: 12px;
+                font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
                 font-size: 11px;
+                line-height: 1.5;
             }
             QScrollBar:vertical {
-                background: #2d2d2d;
-                width: 12px;
-                border-radius: 6px;
+                background: #0f0f1a;
+                width: 8px;
+                border-radius: 4px;
             }
             QScrollBar::handle:vertical {
-                background: #5a5a5a;
-                border-radius: 6px;
-                min-height: 20px;
+                background: qlineargradient(y1:0, y2:1,
+                    stop:0 #667eea, stop:1 #764ba2);
+                border-radius: 4px;
+                min-height: 30px;
             }
             QScrollBar::handle:vertical:hover {
-                background: #7a7a7a;
+                background: qlineargradient(y1:0, y2:1,
+                    stop:0 #7c8ff0, stop:1 #8b5fcf);
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
             }
         """)
 
@@ -285,27 +291,27 @@ class LogWidget(QTextBrowser):
         timestamp = datetime.now().strftime("%H:%M:%S")
 
         colors = {
-            "INFO": "#58a6ff",
-            "SUCCESS": "#56d364",
-            "WARNING": "#f0883e",
-            "ERROR": "#f85149",
-            "DEBUG": "#8b949e"
+            "INFO": "#60a5fa",
+            "SUCCESS": "#34d399",
+            "WARNING": "#fbbf24",
+            "ERROR": "#f87171",
+            "DEBUG": "#94a3b8"
         }
 
         icons = {
-            "INFO": "ℹ️",
-            "SUCCESS": "✅",
-            "WARNING": "⚠️",
-            "ERROR": "❌",
-            "DEBUG": "🔍"
+            "INFO": "●",
+            "SUCCESS": "✓",
+            "WARNING": "⚡",
+            "ERROR": "✕",
+            "DEBUG": "○"
         }
 
-        color = colors.get(level, "#d4d4d4")
+        color = colors.get(level, "#e2e8f0")
         icon = icons.get(level, "•")
 
-        html = f'<span style="color: #8b949e">[{timestamp}]</span> '
-        html += f'<span style="color: {color}">{icon} <b>{level}</b>:</span> '
-        html += f'<span style="color: #d4d4d4">{message}</span>'
+        html = f'<span style="color: #64748b">[{timestamp}]</span> '
+        html += f'<span style="color: {color}"><b>{icon} {level}</b></span> '
+        html += f'<span style="color: #cbd5e1">{message}</span>'
 
         self.append(html)
 
@@ -326,26 +332,39 @@ class FileListWidget(QListWidget):
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.setStyleSheet("""
             QListWidget {
-                background-color: #1e1e1e;
-                border: 2px dashed #3c3c3c;
-                border-radius: 8px;
-                padding: 10px;
+                background-color: #0a0a14;
+                border: 2px dashed rgba(102, 126, 234, 0.4);
+                border-radius: 12px;
+                padding: 12px;
                 font-size: 12px;
             }
             QListWidget::item {
-                background-color: #2d2d2d;
-                border: 1px solid #3c3c3c;
-                border-radius: 4px;
-                padding: 8px;
-                margin: 2px;
-                color: #d4d4d4;
+                background-color: #1a1a2e;
+                border: 1px solid rgba(102, 126, 234, 0.2);
+                border-radius: 8px;
+                padding: 10px 14px;
+                margin: 3px;
+                color: #e2e8f0;
             }
             QListWidget::item:selected {
-                background-color: #667eea;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #667eea, stop:1 #764ba2);
                 border-color: #667eea;
+                color: white;
             }
-            QListWidget::item:hover {
-                background-color: #3c3c3c;
+            QListWidget::item:hover:!selected {
+                background-color: #2d2d4a;
+                border-color: rgba(102, 126, 234, 0.5);
+            }
+            QScrollBar:vertical {
+                background: #0f0f1a;
+                width: 8px;
+                border-radius: 4px;
+            }
+            QScrollBar::handle:vertical {
+                background: qlineargradient(y1:0, y2:1,
+                    stop:0 #667eea, stop:1 #764ba2);
+                border-radius: 4px;
             }
         """)
 
@@ -353,17 +372,26 @@ class FileListWidget(QListWidget):
         """Обработка входа перетаскивания"""
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
-            self.setStyleSheet(self.styleSheet().replace("border: 2px dashed #3c3c3c", "border: 2px solid #667eea"))
+            self.setStyleSheet(self.styleSheet().replace(
+                "border: 2px dashed rgba(102, 126, 234, 0.4)",
+                "border: 2px solid #667eea"
+            ))
         else:
             event.ignore()
 
     def dragLeaveEvent(self, event):
         """Обработка выхода перетаскивания"""
-        self.setStyleSheet(self.styleSheet().replace("border: 2px solid #667eea", "border: 2px dashed #3c3c3c"))
+        self.setStyleSheet(self.styleSheet().replace(
+            "border: 2px solid #667eea",
+            "border: 2px dashed rgba(102, 126, 234, 0.4)"
+        ))
 
     def dropEvent(self, event: QDropEvent):
         """Обработка сброса файлов"""
-        self.setStyleSheet(self.styleSheet().replace("border: 2px solid #667eea", "border: 2px dashed #3c3c3c"))
+        self.setStyleSheet(self.styleSheet().replace(
+            "border: 2px solid #667eea",
+            "border: 2px dashed rgba(102, 126, 234, 0.4)"
+        ))
 
         if event.mimeData().hasUrls():
             files = []
@@ -799,9 +827,9 @@ class ProfessionalTranscriptionWorker(QThread):
             return str(text)[:500]  # Безопасный fallback
 
     def apply_crash_safe_diarization(self, segments):
-        """Диаризация с защитой от крашей"""
+        """Улучшенная диаризация с поддержкой множественных спикеров"""
         try:
-            self.log_signal.emit("Применение диаризации...", "INFO")
+            self.log_signal.emit("Применение улучшенной диаризации...", "INFO")
 
             if not segments or len(segments) == 0:
                 self.log_signal.emit("Нет сегментов для диаризации", "WARNING")
@@ -811,51 +839,51 @@ class ProfessionalTranscriptionWorker(QThread):
             CrashSafeMemoryManager.safe_gpu_cleanup("before diarization")
 
             min_pause = float(self.settings.get('min_pause', 2.0))
-            diarized_segments = []
-            current_speaker = 1
-            last_end = 0.0
+            max_speakers = int(self.settings.get('max_speakers', 5))
 
-            self.log_signal.emit(f"Обрабатываем {len(segments)} сегментов с паузой {min_pause}с", "INFO")
+            self.log_signal.emit(f"Обрабатываем {len(segments)} сегментов (макс. {max_speakers} спикеров, пауза {min_pause}с)", "INFO")
 
+            # Шаг 1: Извлекаем характеристики каждого сегмента
+            segment_features = []
             for i, seg in enumerate(segments):
-                try:
-                    # Проверка остановки
-                    if i % 25 == 0 and not self._is_running:
-                        self.log_signal.emit("Диаризация прервана", "WARNING")
-                        break
-
-                    # Безопасная валидация сегмента
-                    if not self.validate_segment_safely(seg, i):
-                        continue
-
-                    start_time = float(seg['start'])
-                    end_time = float(seg['end'])
-                    text = str(seg['text']).strip()[:500]
-
-                    if not text or len(text) < 2:
-                        continue
-
-                    # Проверяем паузу для смены спикера
-                    if last_end > 0 and start_time - last_end > min_pause:
-                        current_speaker = 2 if current_speaker == 1 else 1
-                        self.log_signal.emit(f"Смена спикера на {current_speaker}", "DEBUG")
-
-                    diarized_segments.append({
-                        'speaker': f"Спикер {current_speaker}",
-                        'text': text,
-                        'start': start_time,
-                        'end': end_time
-                    })
-
-                    last_end = end_time
-
-                    # Периодическая очистка памяти
-                    if i % 50 == 0 and i > 0:
-                        CrashSafeMemoryManager.safe_gpu_cleanup("during diarization")
-
-                except Exception as seg_error:
-                    self.log_signal.emit(f"Пропускаем сегмент {i}: {seg_error}", "DEBUG")
+                if not self.validate_segment_safely(seg, i):
                     continue
+
+                start_time = float(seg['start'])
+                end_time = float(seg['end'])
+                text = str(seg['text']).strip()[:500]
+
+                if not text or len(text) < 2:
+                    continue
+
+                duration = end_time - start_time
+                words = len(text.split())
+                chars = len(text)
+
+                # Характеристики речи
+                speech_rate = words / duration if duration > 0 else 0  # слов в секунду
+                char_rate = chars / duration if duration > 0 else 0  # символов в секунду
+                avg_word_len = chars / words if words > 0 else 0  # средняя длина слова
+
+                segment_features.append({
+                    'index': i,
+                    'start': start_time,
+                    'end': end_time,
+                    'text': text,
+                    'duration': duration,
+                    'speech_rate': speech_rate,
+                    'char_rate': char_rate,
+                    'avg_word_len': avg_word_len,
+                    'words': words
+                })
+
+            if not segment_features:
+                return self.format_simple_text_safely(segments)
+
+            # Шаг 2: Умная диаризация с кластеризацией
+            diarized_segments = self._smart_diarization(
+                segment_features, min_pause, max_speakers
+            )
 
             # Очистка после диаризации
             CrashSafeMemoryManager.safe_gpu_cleanup("after diarization processing")
@@ -873,6 +901,163 @@ class ProfessionalTranscriptionWorker(QThread):
             self.log_signal.emit(f"Ошибка диаризации: {e}", "ERROR")
             CrashSafeMemoryManager.safe_gpu_cleanup("after diarization error")
             return self.format_simple_text_safely(segments)
+
+    def _smart_diarization(self, segment_features, min_pause, max_speakers):
+        """Умная диаризация с анализом характеристик речи"""
+        try:
+            diarized = []
+            speaker_profiles = {}  # Профили спикеров
+            current_speaker = 1
+            last_end = 0.0
+
+            # Цвета для спикеров (для UI)
+            speaker_colors = ['#667eea', '#e53e3e', '#38a169', '#d69e2e', '#9f7aea',
+                              '#ed8936', '#4299e1', '#48bb78', '#f56565', '#805ad5']
+
+            for i, feat in enumerate(segment_features):
+                try:
+                    if i % 25 == 0 and not self._is_running:
+                        self.log_signal.emit("Диаризация прервана", "WARNING")
+                        break
+
+                    start_time = feat['start']
+                    end_time = feat['end']
+                    text = feat['text']
+
+                    # Определяем, нужна ли смена спикера
+                    pause_duration = start_time - last_end if last_end > 0 else 0
+
+                    if pause_duration > min_pause:
+                        # Есть значительная пауза - возможна смена спикера
+                        best_speaker = self._find_best_speaker(
+                            feat, speaker_profiles, current_speaker, max_speakers
+                        )
+
+                        if best_speaker != current_speaker:
+                            self.log_signal.emit(
+                                f"Смена спикера: {current_speaker} -> {best_speaker} (пауза {pause_duration:.1f}с)",
+                                "DEBUG"
+                            )
+                        current_speaker = best_speaker
+
+                    # Обновляем профиль текущего спикера
+                    self._update_speaker_profile(speaker_profiles, current_speaker, feat)
+
+                    # Получаем цвет спикера
+                    color_idx = (current_speaker - 1) % len(speaker_colors)
+
+                    diarized.append({
+                        'speaker': f"Спикер {current_speaker}",
+                        'speaker_id': current_speaker,
+                        'speaker_color': speaker_colors[color_idx],
+                        'text': text,
+                        'start': start_time,
+                        'end': end_time
+                    })
+
+                    last_end = end_time
+
+                    # Периодическая очистка
+                    if i % 50 == 0 and i > 0:
+                        CrashSafeMemoryManager.safe_gpu_cleanup("during smart diarization")
+
+                except Exception as seg_error:
+                    self.log_signal.emit(f"Пропускаем сегмент {i}: {seg_error}", "DEBUG")
+                    continue
+
+            return diarized
+
+        except Exception as e:
+            self.log_signal.emit(f"Ошибка умной диаризации: {e}", "ERROR")
+            return []
+
+    def _find_best_speaker(self, feat, speaker_profiles, current_speaker, max_speakers):
+        """Находит наиболее подходящего спикера для сегмента"""
+        try:
+            if not speaker_profiles:
+                return 1
+
+            # Характеристики текущего сегмента
+            curr_rate = feat['speech_rate']
+            curr_char_rate = feat['char_rate']
+            curr_avg_word = feat['avg_word_len']
+
+            best_speaker = current_speaker
+            best_score = float('inf')
+
+            # Сравниваем с профилями существующих спикеров
+            for speaker_id, profile in speaker_profiles.items():
+                if profile['count'] < 2:
+                    continue
+
+                # Вычисляем расстояние до профиля спикера
+                rate_diff = abs(curr_rate - profile['avg_speech_rate'])
+                char_diff = abs(curr_char_rate - profile['avg_char_rate'])
+                word_diff = abs(curr_avg_word - profile['avg_word_len'])
+
+                # Нормализованный score (меньше = лучше)
+                score = (rate_diff * 2.0) + (char_diff * 0.5) + (word_diff * 1.0)
+
+                if score < best_score:
+                    best_score = score
+                    best_speaker = speaker_id
+
+            # Если score слишком высокий и есть место для нового спикера
+            # создаем нового спикера
+            threshold = 3.0  # Порог для создания нового спикера
+            num_speakers = len(speaker_profiles)
+
+            if best_score > threshold and num_speakers < max_speakers:
+                new_speaker = num_speakers + 1
+                self.log_signal.emit(f"Обнаружен новый спикер {new_speaker} (score={best_score:.2f})", "DEBUG")
+                return new_speaker
+
+            # Если текущий спикер имеет схожий профиль, оставляем его
+            if current_speaker in speaker_profiles:
+                current_profile = speaker_profiles[current_speaker]
+                if current_profile['count'] >= 2:
+                    current_rate_diff = abs(curr_rate - current_profile['avg_speech_rate'])
+                    current_char_diff = abs(curr_char_rate - current_profile['avg_char_rate'])
+                    current_word_diff = abs(curr_avg_word - current_profile['avg_word_len'])
+                    current_score = (current_rate_diff * 2.0) + (current_char_diff * 0.5) + (current_word_diff * 1.0)
+
+                    # Если текущий спикер почти так же хорош, оставляем его
+                    if current_score < best_score * 1.3:
+                        return current_speaker
+
+            return best_speaker
+
+        except Exception as e:
+            self.log_signal.emit(f"Ошибка поиска спикера: {e}", "DEBUG")
+            return current_speaker
+
+    def _update_speaker_profile(self, profiles, speaker_id, feat):
+        """Обновляет профиль спикера новыми данными"""
+        try:
+            if speaker_id not in profiles:
+                profiles[speaker_id] = {
+                    'count': 0,
+                    'total_speech_rate': 0,
+                    'total_char_rate': 0,
+                    'total_word_len': 0,
+                    'avg_speech_rate': 0,
+                    'avg_char_rate': 0,
+                    'avg_word_len': 0
+                }
+
+            p = profiles[speaker_id]
+            p['count'] += 1
+            p['total_speech_rate'] += feat['speech_rate']
+            p['total_char_rate'] += feat['char_rate']
+            p['total_word_len'] += feat['avg_word_len']
+
+            # Обновляем средние значения
+            p['avg_speech_rate'] = p['total_speech_rate'] / p['count']
+            p['avg_char_rate'] = p['total_char_rate'] / p['count']
+            p['avg_word_len'] = p['total_word_len'] / p['count']
+
+        except Exception as e:
+            pass  # Молча игнорируем ошибки обновления профиля
 
     def validate_segment_safely(self, seg, index):
         """Безопасная валидация сегмента"""
@@ -937,13 +1122,28 @@ class ProfessionalTranscriptionWorker(QThread):
             return "Ошибка при форматировании результата."
 
     def format_diarized_text_safely(self, segments):
-        """Безопасное форматирование диаризованного текста"""
+        """Безопасное форматирование диаризованного текста с HTML и цветами"""
         try:
             if not segments or len(segments) == 0:
                 return "Нет сегментов для форматирования."
 
+            # Цвета для спикеров
+            speaker_colors = {
+                1: '#667eea',  # Синий-фиолетовый
+                2: '#ef4444',  # Красный
+                3: '#10b981',  # Зеленый
+                4: '#f59e0b',  # Оранжевый
+                5: '#a78bfa',  # Светло-фиолетовый
+                6: '#06b6d4',  # Голубой
+                7: '#f97316',  # Оранжевый яркий
+                8: '#84cc16',  # Лайм
+                9: '#ec4899',  # Розовый
+                10: '#8b5cf6', # Фиолетовый
+            }
+
             formatted_parts = []
             current_speaker = None
+            current_speaker_id = None
             current_texts = []
 
             for i, seg in enumerate(segments):
@@ -952,6 +1152,7 @@ class ProfessionalTranscriptionWorker(QThread):
                         continue
 
                     speaker = str(seg.get('speaker', 'Неизвестный')).strip()[:50]
+                    speaker_id = seg.get('speaker_id', 1)
                     text = str(seg.get('text', '')).strip()[:1000]
 
                     if not speaker or not text:
@@ -959,10 +1160,13 @@ class ProfessionalTranscriptionWorker(QThread):
 
                     if speaker != current_speaker:
                         if current_texts and current_speaker:
-                            speaker_line = f"{current_speaker}: {' '.join(current_texts)}"
-                            formatted_parts.append(speaker_line[:3000])
+                            color = speaker_colors.get(current_speaker_id, '#667eea')
+                            speaker_html = f'<span style="color: {color}; font-weight: bold;">{current_speaker}:</span>'
+                            text_html = f'<span style="color: #e2e8f0;"> {" ".join(current_texts)}</span>'
+                            formatted_parts.append(f'<p style="margin: 10px 0;">{speaker_html}{text_html}</p>')
 
                         current_speaker = speaker
+                        current_speaker_id = speaker_id
                         current_texts = [text]
                     else:
                         current_texts.append(text)
@@ -973,23 +1177,61 @@ class ProfessionalTranscriptionWorker(QThread):
                 except Exception:
                     continue
 
+            # Добавляем последний блок
             if current_texts and current_speaker:
-                speaker_line = f"{current_speaker}: {' '.join(current_texts)}"
-                formatted_parts.append(speaker_line[:3000])
+                color = speaker_colors.get(current_speaker_id, '#667eea')
+                speaker_html = f'<span style="color: {color}; font-weight: bold;">{current_speaker}:</span>'
+                text_html = f'<span style="color: #e2e8f0;"> {" ".join(current_texts)}</span>'
+                formatted_parts.append(f'<p style="margin: 10px 0;">{speaker_html}{text_html}</p>')
 
             if not formatted_parts:
                 return "Не удалось сформатировать диаризованный текст."
 
-            result = "\n\n".join(formatted_parts)
+            # HTML обертка
+            result = f'''<div style="font-family: 'Segoe UI', sans-serif; line-height: 1.6;">
+                {"".join(formatted_parts)}
+            </div>'''
 
-            if len(result) > 200000:
-                result = result[:200000] + "\n\n[Результат обрезан для стабильности]"
+            # Также сохраняем plain text версию для экспорта
+            self._plain_text_result = self._extract_plain_text(segments)
 
             return result if result.strip() else "Пустой результат диаризации."
 
         except Exception as e:
             self.log_signal.emit(f"Ошибка форматирования диаризации: {e}", "ERROR")
             return "Ошибка при форматировании диаризованного текста."
+
+    def _extract_plain_text(self, segments):
+        """Извлекает plain text из сегментов для экспорта"""
+        try:
+            formatted_parts = []
+            current_speaker = None
+            current_texts = []
+
+            for seg in segments:
+                if not seg or not isinstance(seg, dict):
+                    continue
+
+                speaker = str(seg.get('speaker', 'Неизвестный')).strip()
+                text = str(seg.get('text', '')).strip()
+
+                if not speaker or not text:
+                    continue
+
+                if speaker != current_speaker:
+                    if current_texts and current_speaker:
+                        formatted_parts.append(f"{current_speaker}: {' '.join(current_texts)}")
+                    current_speaker = speaker
+                    current_texts = [text]
+                else:
+                    current_texts.append(text)
+
+            if current_texts and current_speaker:
+                formatted_parts.append(f"{current_speaker}: {' '.join(current_texts)}")
+
+            return "\n\n".join(formatted_parts)
+        except:
+            return ""
 
     def format_time(self, seconds):
         """Форматирование времени"""
@@ -1086,35 +1328,35 @@ class MainWindow(QMainWindow):
         header_layout.setSpacing(0)
         header_layout.setContentsMargins(0,0,0,0)
 
-        title_label = QLabel("ПРОФЕССИОНАЛЬНАЯ ТРАНСКРИБАЦИЯ")
+        title_label = QLabel("AUDIO/VIDEO TRANSCRIPTION PRO")
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title_label.setStyleSheet("""
             QLabel {
-                font-size: 24px;
-                font-weight: bold;
+                font-size: 26px;
+                font-weight: 700;
                 color: #ffffff;
-                padding-top: 10px;
+                padding-top: 15px;
                 padding-bottom: 5px;
+                letter-spacing: 2px;
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #667eea, stop:1 #764ba2);
-                border-top-left-radius: 10px;
-                border-top-right-radius: 10px;
+                    stop:0 #667eea, stop:0.5 #764ba2, stop:1 #a78bfa);
+                border-top-left-radius: 15px;
+                border-top-right-radius: 15px;
             }
         """)
 
-        author_label = QLabel(f"by {AUTHOR} | 📂 Поддержка множественных файлов | 🎯 Drag & Drop")
+        author_label = QLabel(f"v{APP_VERSION} by {AUTHOR}  |  Multi-File  |  Drag & Drop  |  Smart Diarization")
         author_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         author_label.setStyleSheet("""
             QLabel {
-                font-size: 12px;
-                font-style: italic;
-                color: #e2e8f0;
-                padding-bottom: 10px;
-                padding-top: 0px;
+                font-size: 11px;
+                color: rgba(255, 255, 255, 0.85);
+                padding-bottom: 12px;
+                padding-top: 2px;
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #667eea, stop:1 #764ba2);
-                border-bottom-left-radius: 10px;
-                border-bottom-right-radius: 10px;
+                    stop:0 #667eea, stop:0.5 #764ba2, stop:1 #a78bfa);
+                border-bottom-left-radius: 15px;
+                border-bottom-right-radius: 15px;
             }
         """)
 
@@ -1126,24 +1368,30 @@ class MainWindow(QMainWindow):
         tabs = QTabWidget()
         tabs.setStyleSheet("""
             QTabWidget::pane {
-                border: 1px solid #3c3c3c;
-                background: #2d2d2d;
-                border-radius: 8px;
+                border: 1px solid rgba(102, 126, 234, 0.3);
+                background: #16162a;
+                border-radius: 12px;
+                padding: 5px;
             }
             QTabBar::tab {
-                background: #3c3c3c;
-                color: #d4d4d4;
-                padding: 10px 20px;
-                margin-right: 2px;
-                border-top-left-radius: 8px;
-                border-top-right-radius: 8px;
+                background: #1a1a2e;
+                color: #a0aec0;
+                padding: 12px 24px;
+                margin-right: 4px;
+                border-top-left-radius: 10px;
+                border-top-right-radius: 10px;
+                font-weight: 600;
+                border: 1px solid transparent;
+                border-bottom: none;
             }
             QTabBar::tab:selected {
-                background: #667eea;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #667eea, stop:1 #764ba2);
                 color: white;
             }
-            QTabBar::tab:hover {
-                background: #4c5cda;
+            QTabBar::tab:hover:!selected {
+                background: #2d2d4a;
+                border-color: rgba(102, 126, 234, 0.4);
             }
         """)
 
@@ -1204,41 +1452,57 @@ class MainWindow(QMainWindow):
         # Кнопки управления файлами
         file_buttons_layout = QHBoxLayout()
 
-        self.select_file_btn = QPushButton("➕ Добавить файлы")
-        self.select_file_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
+        self.select_file_btn = QPushButton("+ Добавить файлы")
         self.select_file_btn.setStyleSheet("""
             QPushButton {
-                padding: 8px 16px;
-                font-size: 14px;
-                font-weight: bold;
-                background: #38a169;
+                padding: 10px 20px;
+                font-size: 13px;
+                font-weight: 600;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #10b981, stop:1 #059669);
+                color: white;
+                border: none;
+                border-radius: 8px;
             }
             QPushButton:hover {
-                background: #2f855a;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #059669, stop:1 #047857);
             }
         """)
 
-        self.clear_queue_btn = QPushButton("🗑️ Очистить очередь")
+        self.clear_queue_btn = QPushButton("Очистить")
         self.clear_queue_btn.setStyleSheet("""
             QPushButton {
-                padding: 8px 16px;
-                font-size: 14px;
-                background: #e53e3e;
+                padding: 10px 20px;
+                font-size: 13px;
+                font-weight: 600;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #ef4444, stop:1 #dc2626);
+                color: white;
+                border: none;
+                border-radius: 8px;
             }
             QPushButton:hover {
-                background: #c53030;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #dc2626, stop:1 #b91c1c);
             }
         """)
 
-        self.remove_selected_btn = QPushButton("❌ Удалить выбранные")
+        self.remove_selected_btn = QPushButton("Удалить выбранные")
         self.remove_selected_btn.setStyleSheet("""
             QPushButton {
-                padding: 8px 16px;
-                font-size: 14px;
-                background: #ed8936;
+                padding: 10px 20px;
+                font-size: 13px;
+                font-weight: 600;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #f59e0b, stop:1 #d97706);
+                color: white;
+                border: none;
+                border-radius: 8px;
             }
             QPushButton:hover {
-                background: #dd6b20;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #d97706, stop:1 #b45309);
             }
         """)
 
@@ -1252,9 +1516,16 @@ class MainWindow(QMainWindow):
         self.file_list_widget.files_dropped.connect(self.add_files_to_queue)
 
         # Подсказка для drag&drop
-        drag_drop_hint = QLabel("🎯 Перетащите файлы сюда или используйте кнопку добавления")
+        drag_drop_hint = QLabel("Перетащите файлы сюда или используйте кнопку добавления")
         drag_drop_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        drag_drop_hint.setStyleSheet("color: #8b949e; font-style: italic; padding: 10px;")
+        drag_drop_hint.setStyleSheet("""
+            QLabel {
+                color: #64748b;
+                font-style: italic;
+                padding: 8px;
+                background: transparent;
+            }
+        """)
 
         file_layout.addLayout(file_buttons_layout)
         file_layout.addWidget(drag_drop_hint)
@@ -1264,68 +1535,77 @@ class MainWindow(QMainWindow):
         # Контролы
         control_layout = QHBoxLayout()
 
-        self.transcribe_btn = QPushButton("▶️ НАЧАТЬ ТРАНСКРИБАЦИЮ")
+        self.transcribe_btn = QPushButton("НАЧАТЬ ТРАНСКРИБАЦИЮ")
         self.transcribe_btn.setEnabled(False)
         self.transcribe_btn.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #667eea, stop:1 #764ba2);
+                    stop:0 #667eea, stop:0.5 #764ba2, stop:1 #a78bfa);
                 color: white;
                 border: none;
-                padding: 12px 30px;
-                font-size: 16px;
-                font-weight: bold;
-                border-radius: 25px;
+                padding: 14px 35px;
+                font-size: 15px;
+                font-weight: 700;
+                border-radius: 12px;
+                letter-spacing: 1px;
             }
             QPushButton:hover {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #5a67d8, stop:1 #6b46c1);
+                    stop:0 #5a67d8, stop:0.5 #6b46c1, stop:1 #9061f9);
             }
             QPushButton:pressed {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #4c51bf, stop:1 #553c9a);
+                    stop:0 #4c51bf, stop:0.5 #553c9a, stop:1 #7c3aed);
             }
             QPushButton:disabled {
-                background: #4a5568;
+                background: #1a1a2e;
+                color: #4a5568;
             }
         """)
 
-        self.stop_btn = QPushButton("⏹️ Остановить")
+        self.stop_btn = QPushButton("ОСТАНОВИТЬ")
         self.stop_btn.setEnabled(False)
         self.stop_btn.setStyleSheet("""
             QPushButton {
-                background: #e53e3e;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #ef4444, stop:1 #dc2626);
                 color: white;
                 border: none;
-                padding: 12px 30px;
-                font-size: 16px;
-                font-weight: bold;
-                border-radius: 25px;
+                padding: 14px 35px;
+                font-size: 15px;
+                font-weight: 700;
+                border-radius: 12px;
+                letter-spacing: 1px;
             }
             QPushButton:hover {
-                background: #c53030;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #dc2626, stop:1 #b91c1c);
             }
             QPushButton:disabled {
-                background: #4a5568;
+                background: #1a1a2e;
+                color: #4a5568;
             }
         """)
 
-        self.download_model_btn = QPushButton("📥 Скачать модель")
+        self.download_model_btn = QPushButton("Скачать модель")
         self.download_model_btn.setStyleSheet("""
             QPushButton {
-                background: #38a169;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #10b981, stop:1 #059669);
                 color: white;
                 border: none;
-                padding: 12px 30px;
-                font-size: 16px;
-                font-weight: bold;
-                border-radius: 25px;
+                padding: 14px 25px;
+                font-size: 13px;
+                font-weight: 600;
+                border-radius: 12px;
             }
             QPushButton:hover {
-                background: #2f855a;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #059669, stop:1 #047857);
             }
             QPushButton:disabled {
-                background: #4a5568;
+                background: #1a1a2e;
+                color: #4a5568;
             }
         """)
 
@@ -1339,35 +1619,54 @@ class MainWindow(QMainWindow):
         self.progress_bar.setTextVisible(True)
         self.progress_bar.setStyleSheet("""
             QProgressBar {
-                border: 2px solid #3c3c3c;
-                border-radius: 10px;
+                border: 1px solid rgba(102, 126, 234, 0.3);
+                border-radius: 12px;
                 text-align: center;
-                font-weight: bold;
-                background-color: #2d2d2d;
-                height: 25px;
+                font-weight: 600;
+                font-size: 12px;
+                background-color: #0f0f1a;
+                height: 28px;
+                color: #e2e8f0;
             }
             QProgressBar::chunk {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #667eea, stop:1 #764ba2);
-                border-radius: 8px;
+                    stop:0 #667eea, stop:0.5 #764ba2, stop:1 #a78bfa);
+                border-radius: 11px;
             }
         """)
         self.progress_bar.hide()
 
         self.status_label = QLabel("")
-        self.status_label.setStyleSheet("color: #8b949e; font-size: 12px;")
+        self.status_label.setStyleSheet("""
+            QLabel {
+                color: #94a3b8;
+                font-size: 12px;
+                padding: 5px;
+                background: transparent;
+            }
+        """)
         self.status_label.hide()
 
         # Splitter для результатов
         splitter = QSplitter(Qt.Orientation.Vertical)
 
         # Результат
-        result_group = QGroupBox("📄 РЕЗУЛЬТАТ")
+        result_group = QGroupBox("РЕЗУЛЬТАТ")
         result_layout = QVBoxLayout()
 
-        self.result_text = QTextEdit()
-        self.result_text.setReadOnly(True)
-        self.result_text.setPlaceholderText("Здесь появится расшифровка...")
+        self.result_text = QTextBrowser()
+        self.result_text.setOpenExternalLinks(False)
+        self.result_text.setStyleSheet("""
+            QTextBrowser {
+                background-color: #0a0a14;
+                color: #e2e8f0;
+                border: 1px solid rgba(102, 126, 234, 0.2);
+                border-radius: 10px;
+                padding: 15px;
+                font-size: 13px;
+                line-height: 1.6;
+            }
+        """)
 
         # Кнопки сохранения
         save_layout = QHBoxLayout()
@@ -1470,19 +1769,37 @@ class MainWindow(QMainWindow):
         self.diarization_checkbox.setChecked(True)
 
         # Информация о диаризации
-        info_label = QLabel("Автоматически разделяет речь разных говорящих")
+        info_label = QLabel("Улучшенная диаризация с поддержкой до 10 спикеров")
         info_label.setStyleSheet("color: #56d364; font-size: 11px; margin: 5px 0px;")
         info_label.setWordWrap(True)
 
-        # Параметры диаризации
+        # Первый ряд параметров - количество спикеров
+        speakers_layout = QHBoxLayout()
+
+        speakers_layout.addWidget(QLabel("Макс. спикеров:"))
+        self.max_speakers_spin = QSpinBox()
+        self.max_speakers_spin.setMinimum(2)
+        self.max_speakers_spin.setMaximum(10)
+        self.max_speakers_spin.setValue(5)
+        self.max_speakers_spin.setToolTip("Максимальное количество спикеров для определения (2-10)")
+        self.max_speakers_spin.setStyleSheet("""
+            QSpinBox {
+                min-width: 60px;
+                padding: 4px 8px;
+            }
+        """)
+        speakers_layout.addWidget(self.max_speakers_spin)
+        speakers_layout.addStretch()
+
+        # Второй ряд параметров
         params_layout = QHBoxLayout()
 
-        params_layout.addWidget(QLabel("Мин. пауза между спикерами (сек):"))
+        params_layout.addWidget(QLabel("Мин. пауза (сек):"))
         self.min_pause_spin = QSpinBox()
         self.min_pause_spin.setMinimum(1)
         self.min_pause_spin.setMaximum(10)
         self.min_pause_spin.setValue(2)
-        self.min_pause_spin.setToolTip("Минимальная пауза для смены спикера")
+        self.min_pause_spin.setToolTip("Минимальная пауза для возможной смены спикера")
         params_layout.addWidget(self.min_pause_spin)
 
         params_layout.addWidget(QLabel("Мин. тишина (мс):"))
@@ -1498,6 +1815,7 @@ class MainWindow(QMainWindow):
 
         diarization_layout.addWidget(self.diarization_checkbox)
         diarization_layout.addWidget(info_label)
+        diarization_layout.addLayout(speakers_layout)
         diarization_layout.addLayout(params_layout)
         diarization_group.setLayout(diarization_layout)
 
@@ -1569,16 +1887,33 @@ class MainWindow(QMainWindow):
         status_bar = self.statusBar()
         status_bar.setStyleSheet("""
             QStatusBar {
-                background: #1e1e1e;
-                color: #8b949e;
-                border-top: 1px solid #3c3c3c;
+                background: #0f0f1a;
+                color: #94a3b8;
+                border-top: 1px solid rgba(102, 126, 234, 0.2);
+                padding: 4px 10px;
+                font-size: 11px;
+            }
+            QStatusBar::item {
+                border: none;
             }
         """)
 
-        self.memory_label = QLabel("💾 Память: --")
+        label_style = """
+            QLabel {
+                color: #94a3b8;
+                padding: 0 15px;
+                background: transparent;
+            }
+        """
+
+        self.memory_label = QLabel("RAM: --")
+        self.memory_label.setStyleSheet(label_style)
         self.gpu_label = QLabel("GPU: --")
-        self.time_label = QLabel("⏱️ Время: --")
-        self.queue_label = QLabel("📂 Очередь: 0 файлов")
+        self.gpu_label.setStyleSheet(label_style)
+        self.time_label = QLabel("--:--:--")
+        self.time_label.setStyleSheet(label_style)
+        self.queue_label = QLabel("Очередь: 0")
+        self.queue_label.setStyleSheet(label_style)
 
         status_bar.addPermanentWidget(self.queue_label)
         status_bar.addPermanentWidget(self.memory_label)
@@ -1591,7 +1926,7 @@ class MainWindow(QMainWindow):
         self.status_timer.start(1000)
 
     def create_save_button(self, text, color):
-        """Создание кнопки сохранения"""
+        """Создание кнопки сохранения с современным стилем"""
         btn = QPushButton(text)
         btn.setEnabled(False)
         btn.setStyleSheet(f"""
@@ -1599,140 +1934,255 @@ class MainWindow(QMainWindow):
                 background: {color};
                 color: white;
                 border: none;
-                padding: 8px 20px;
-                font-weight: bold;
-                border-radius: 20px;
+                padding: 10px 22px;
+                font-weight: 600;
+                font-size: 12px;
+                border-radius: 10px;
             }}
             QPushButton:hover {{
                 background: {color}dd;
+                transform: translateY(-1px);
             }}
             QPushButton:pressed {{
                 background: {color}bb;
             }}
             QPushButton:disabled {{
-                background: #4a5568;
-                color: #718096;
+                background: #1a1a2e;
+                color: #4a5568;
             }}
         """)
         return btn
 
     def get_dark_theme(self):
-        """Темная тема"""
+        """Современная темная тема с улучшенным дизайном"""
         return """
             QMainWindow {
-                background-color: #1e1e1e;
+                background-color: #0f0f1a;
             }
             QWidget {
-                background-color: #2d2d2d;
-                color: #d4d4d4;
-                font-family: 'Segoe UI', Arial, sans-serif;
+                background-color: #16162a;
+                color: #e2e8f0;
+                font-family: 'Segoe UI', 'SF Pro Display', -apple-system, Arial, sans-serif;
                 font-size: 13px;
             }
             QGroupBox {
-                border: 2px solid #3c3c3c;
-                border-radius: 8px;
-                margin-top: 10px;
-                padding-top: 10px;
-                font-weight: bold;
+                border: 1px solid rgba(102, 126, 234, 0.3);
+                border-radius: 12px;
+                margin-top: 12px;
+                padding: 15px;
+                padding-top: 25px;
+                font-weight: 600;
                 font-size: 14px;
+                background-color: rgba(22, 22, 42, 0.8);
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 10px 0 10px;
-                color: #58a6ff;
+                left: 15px;
+                padding: 0 12px;
+                color: #a78bfa;
+                background-color: #16162a;
+                border-radius: 4px;
             }
             QPushButton {
-                background-color: #3c3c3c;
-                border: 1px solid #484848;
-                padding: 6px 12px;
-                border-radius: 6px;
-                font-weight: bold;
+                background-color: #2d2d4a;
+                border: 1px solid rgba(102, 126, 234, 0.4);
+                padding: 8px 16px;
+                border-radius: 8px;
+                font-weight: 600;
+                color: #e2e8f0;
             }
             QPushButton:hover {
-                background-color: #484848;
+                background-color: #3d3d5c;
+                border-color: rgba(102, 126, 234, 0.7);
             }
             QPushButton:pressed {
-                background-color: #2d2d2d;
+                background-color: #1e1e3a;
+            }
+            QPushButton:disabled {
+                background-color: #1a1a2e;
+                color: #4a5568;
+                border-color: rgba(74, 85, 104, 0.3);
             }
             QComboBox {
-                background-color: #3c3c3c;
-                border: 1px solid #484848;
-                padding: 6px;
-                border-radius: 6px;
+                background-color: #2d2d4a;
+                border: 1px solid rgba(102, 126, 234, 0.3);
+                padding: 8px 12px;
+                border-radius: 8px;
+                min-width: 150px;
+            }
+            QComboBox:hover {
+                border-color: rgba(102, 126, 234, 0.6);
             }
             QComboBox:drop-down {
                 border: none;
+                padding-right: 10px;
             }
             QComboBox::down-arrow {
                 image: none;
                 border-left: 5px solid transparent;
                 border-right: 5px solid transparent;
-                border-top: 5px solid #d4d4d4;
-                margin-right: 5px;
+                border-top: 6px solid #a78bfa;
+                margin-right: 8px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #2d2d4a;
+                border: 1px solid rgba(102, 126, 234, 0.3);
+                border-radius: 8px;
+                selection-background-color: #667eea;
+                padding: 4px;
             }
             QLineEdit {
-                background-color: #3c3c3c;
-                border: 1px solid #484848;
-                padding: 6px;
-                border-radius: 6px;
+                background-color: #2d2d4a;
+                border: 1px solid rgba(102, 126, 234, 0.3);
+                padding: 8px 12px;
+                border-radius: 8px;
+            }
+            QLineEdit:focus {
+                border-color: #667eea;
             }
             QTextEdit {
-                background-color: #1e1e1e;
-                border: 1px solid #3c3c3c;
-                border-radius: 6px;
-                padding: 8px;
+                background-color: #0f0f1a;
+                border: 1px solid rgba(102, 126, 234, 0.2);
+                border-radius: 10px;
+                padding: 12px;
+                selection-background-color: #667eea;
+            }
+            QTextEdit:focus {
+                border-color: rgba(102, 126, 234, 0.5);
             }
             QProgressBar {
                 text-align: center;
+                border: none;
+                border-radius: 10px;
+                background-color: #1a1a2e;
+                height: 20px;
+            }
+            QProgressBar::chunk {
+                border-radius: 10px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #667eea, stop:0.5 #764ba2, stop:1 #a78bfa);
             }
             QScrollBar:vertical {
-                background: #2d2d2d;
-                width: 12px;
-                border-radius: 6px;
+                background: #1a1a2e;
+                width: 10px;
+                border-radius: 5px;
+                margin: 2px;
             }
             QScrollBar::handle:vertical {
-                background: #5a5a5a;
-                border-radius: 6px;
-                min-height: 20px;
+                background: qlineargradient(y1:0, y2:1,
+                    stop:0 #667eea, stop:1 #764ba2);
+                border-radius: 5px;
+                min-height: 30px;
             }
             QScrollBar::handle:vertical:hover {
-                background: #7a7a7a;
+                background: qlineargradient(y1:0, y2:1,
+                    stop:0 #7c8ff0, stop:1 #8b5fcf);
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+            QScrollBar:horizontal {
+                background: #1a1a2e;
+                height: 10px;
+                border-radius: 5px;
+                margin: 2px;
+            }
+            QScrollBar::handle:horizontal {
+                background: qlineargradient(x1:0, x2:1,
+                    stop:0 #667eea, stop:1 #764ba2);
+                border-radius: 5px;
+                min-width: 30px;
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                width: 0px;
             }
             QSpinBox {
-                background-color: #3c3c3c;
-                border: 1px solid #484848;
-                padding: 4px;
-                border-radius: 6px;
+                background-color: #2d2d4a;
+                border: 1px solid rgba(102, 126, 234, 0.3);
+                padding: 6px 10px;
+                border-radius: 8px;
+                min-width: 70px;
+            }
+            QSpinBox:hover {
+                border-color: rgba(102, 126, 234, 0.6);
+            }
+            QSpinBox::up-button, QSpinBox::down-button {
+                background-color: transparent;
+                border: none;
+                width: 16px;
+            }
+            QSpinBox::up-arrow {
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-bottom: 5px solid #a78bfa;
+            }
+            QSpinBox::down-arrow {
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid #a78bfa;
             }
             QCheckBox {
-                spacing: 8px;
+                spacing: 10px;
             }
             QCheckBox::indicator {
-                width: 18px;
-                height: 18px;
-                border-radius: 4px;
-                border: 2px solid #484848;
-                background-color: #2d2d2d;
+                width: 20px;
+                height: 20px;
+                border-radius: 6px;
+                border: 2px solid rgba(102, 126, 234, 0.4);
+                background-color: #1a1a2e;
+            }
+            QCheckBox::indicator:hover {
+                border-color: rgba(102, 126, 234, 0.7);
             }
             QCheckBox::indicator:checked {
-                background-color: #667eea;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #667eea, stop:1 #764ba2);
                 border-color: #667eea;
             }
             QMenuBar {
-                background-color: #2d2d2d;
-                color: #d4d4d4;
+                background-color: #16162a;
+                color: #e2e8f0;
+                border-bottom: 1px solid rgba(102, 126, 234, 0.2);
+                padding: 4px;
+            }
+            QMenuBar::item {
+                padding: 6px 12px;
+                border-radius: 6px;
             }
             QMenuBar::item:selected {
-                background-color: #667eea;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #667eea, stop:1 #764ba2);
             }
             QMenu {
-                background-color: #2d2d2d;
-                border: 1px solid #3c3c3c;
-                color: #d4d4d4;
+                background-color: #2d2d4a;
+                border: 1px solid rgba(102, 126, 234, 0.3);
+                border-radius: 8px;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 8px 20px;
+                border-radius: 4px;
             }
             QMenu::item:selected {
-                background-color: #667eea;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #667eea, stop:1 #764ba2);
+            }
+            QLabel {
+                color: #e2e8f0;
+            }
+            QToolTip {
+                background-color: #2d2d4a;
+                color: #e2e8f0;
+                border: 1px solid rgba(102, 126, 234, 0.4);
+                border-radius: 6px;
+                padding: 6px 10px;
+            }
+            QSplitter::handle {
+                background: rgba(102, 126, 234, 0.3);
+                height: 3px;
+            }
+            QSplitter::handle:hover {
+                background: #667eea;
             }
         """
 
@@ -1743,6 +2193,7 @@ class MainWindow(QMainWindow):
         # Включаем/выключаем параметры
         self.min_pause_spin.setEnabled(enabled)
         self.min_silence_spin.setEnabled(enabled)
+        self.max_speakers_spin.setEnabled(enabled)
 
         self.log_widget.log(f"Диаризация {'включена' if enabled else 'отключена'}", "INFO")
 
@@ -1807,7 +2258,7 @@ class MainWindow(QMainWindow):
         try:
             import psutil
             memory = psutil.Process().memory_info().rss / (1024 ** 3)
-            self.memory_label.setText(f"💾 Память: {memory:.1f} GB")
+            self.memory_label.setText(f"RAM: {memory:.1f} GB")
         except:
             pass
 
@@ -1817,18 +2268,18 @@ class MainWindow(QMainWindow):
                 import torch
                 allocated = torch.cuda.memory_allocated() / (1024 ** 3)
                 reserved = torch.cuda.memory_reserved() / (1024 ** 3)
-                self.gpu_label.setText(f"GPU: {allocated:.1f}/{reserved:.1f} GB")
+                self.gpu_label.setText(f"VRAM: {allocated:.1f}/{reserved:.1f} GB")
             except:
                 pass
         else:
-            self.gpu_label.setText("CPU режим")
+            self.gpu_label.setText("CPU")
 
         # Время
         current_time = datetime.now().strftime("%H:%M:%S")
-        self.time_label.setText(f"⏱️ {current_time}")
+        self.time_label.setText(current_time)
 
         # Очередь
-        self.queue_label.setText(f"📂 Очередь: {len(self.file_queue)} файлов")
+        self.queue_label.setText(f"Очередь: {len(self.file_queue)}")
 
     def select_files(self):
         """Выбор файлов (множественный)"""
@@ -1988,7 +2439,8 @@ class MainWindow(QMainWindow):
             'model_size': model,
             'use_diarization': self.diarization_checkbox.isChecked(),
             'min_pause': float(self.min_pause_spin.value()),
-            'min_silence': int(self.min_silence_spin.value())
+            'min_silence': int(self.min_silence_spin.value()),
+            'max_speakers': int(self.max_speakers_spin.value())
         }
 
         # Список путей файлов
@@ -2107,8 +2559,15 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, "Ошибка", result)
                 self.log_widget.log(result, "ERROR")
             else:
-                self.transcribed_text = result
-                self.result_text.setPlainText(result)
+                # Отображаем результат
+                if '<div' in result or '<span' in result:
+                    # Это HTML - отображаем с цветами
+                    self.result_text.setHtml(result)
+                    # Для экспорта используем plain text из QTextBrowser
+                    self.transcribed_text = self.result_text.toPlainText()
+                else:
+                    self.transcribed_text = result
+                    self.result_text.setPlainText(result)
 
                 # Активация кнопок сохранения
                 for btn in [self.save_txt_btn, self.save_docx_btn, self.save_json_btn, self.save_all_btn]:
