@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QStyleFactory, QProgressBar, QComboBox,
     QCheckBox, QSpinBox, QTabWidget, QTextBrowser,
     QSplitter, QFrame, QStyle, QDialog, QListWidget,
-    QListWidgetItem, QAbstractItemView
+    QListWidgetItem, QAbstractItemView, QScrollArea
 )
 from PySide6.QtCore import Qt, QThread, Signal, Slot, QTimer, QPropertyAnimation, QEasingCurve, QMutex, QMutexLocker, QMimeData, QUrl
 from PySide6.QtGui import QIcon, QFont, QPalette, QColor, QTextCharFormat, QTextCursor, QPixmap, QDragEnterEvent, QDropEvent
@@ -319,6 +319,144 @@ class LogWidget(QTextBrowser):
         cursor = self.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         self.setTextCursor(cursor)
+
+
+class DropZoneWidget(QWidget):
+    """Виджет зоны для перетаскивания файлов - вся область принимает файлы"""
+
+    files_dropped = Signal(list)
+
+    def __init__(self):
+        super().__init__()
+        self.setAcceptDrops(True)
+        self._is_dragging = False
+
+        # Основной layout
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Подсказка для drag&drop
+        self.hint_label = QLabel("Перетащите файлы сюда или используйте кнопку добавления")
+        self.hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.hint_label.setStyleSheet("""
+            QLabel {
+                color: #64748b;
+                font-style: italic;
+                padding: 8px;
+                background: transparent;
+            }
+        """)
+
+        # Список файлов
+        self.file_list = QListWidget()
+        self.file_list.setAcceptDrops(False)  # Отключаем DnD у списка, т.к. обрабатываем на уровне контейнера
+        self.file_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.file_list.setStyleSheet("""
+            QListWidget {
+                background-color: #0a0a14;
+                border: none;
+                border-radius: 8px;
+                padding: 8px;
+                font-size: 12px;
+            }
+            QListWidget::item {
+                background-color: #1a1a2e;
+                border: 1px solid rgba(102, 126, 234, 0.2);
+                border-radius: 8px;
+                padding: 10px 14px;
+                margin: 3px;
+                color: #e2e8f0;
+            }
+            QListWidget::item:selected {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #667eea, stop:1 #764ba2);
+                border-color: #667eea;
+                color: white;
+            }
+            QListWidget::item:hover:!selected {
+                background-color: #2d2d4a;
+                border-color: rgba(102, 126, 234, 0.5);
+            }
+            QScrollBar:vertical {
+                background: #0f0f1a;
+                width: 8px;
+                border-radius: 4px;
+            }
+            QScrollBar::handle:vertical {
+                background: qlineargradient(y1:0, y2:1,
+                    stop:0 #667eea, stop:1 #764ba2);
+                border-radius: 4px;
+            }
+        """)
+
+        layout.addWidget(self.hint_label)
+        layout.addWidget(self.file_list)
+
+        self._update_style(False)
+
+    def _update_style(self, is_dragging):
+        """Обновление стиля при перетаскивании"""
+        if is_dragging:
+            self.setStyleSheet("""
+                DropZoneWidget {
+                    background-color: #0a0a14;
+                    border: 2px solid #667eea;
+                    border-radius: 12px;
+                }
+            """)
+        else:
+            self.setStyleSheet("""
+                DropZoneWidget {
+                    background-color: #0a0a14;
+                    border: 2px dashed rgba(102, 126, 234, 0.4);
+                    border-radius: 12px;
+                }
+            """)
+
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        """Обработка входа перетаскивания"""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            self._is_dragging = True
+            self._update_style(True)
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        """Обработка движения при перетаскивании"""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragLeaveEvent(self, event):
+        """Обработка выхода перетаскивания"""
+        self._is_dragging = False
+        self._update_style(False)
+
+    def dropEvent(self, event: QDropEvent):
+        """Обработка сброса файлов"""
+        self._is_dragging = False
+        self._update_style(False)
+
+        if event.mimeData().hasUrls():
+            files = []
+            for url in event.mimeData().urls():
+                file_path = url.toLocalFile()
+                if os.path.isfile(file_path):
+                    ext = os.path.splitext(file_path)[1].lower()
+                    supported_formats = ['.mp4', '.mkv', '.avi', '.mov', '.webm', '.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg']
+                    if ext in supported_formats:
+                        files.append(file_path)
+
+            if files:
+                self.files_dropped.emit(files)
+                event.acceptProposedAction()
+            else:
+                event.ignore()
+        else:
+            event.ignore()
 
 
 class FileListWidget(QListWidget):
@@ -1121,11 +1259,23 @@ class ProfessionalTranscriptionWorker(QThread):
             self.log_signal.emit(f"Ошибка простого форматирования: {e}", "ERROR")
             return "Ошибка при форматировании результата."
 
+    def _format_time(self, seconds):
+        """Форматирование времени в читаемый формат [MM:SS]"""
+        try:
+            mins = int(seconds // 60)
+            secs = int(seconds % 60)
+            return f"[{mins:02d}:{secs:02d}]"
+        except:
+            return ""
+
     def format_diarized_text_safely(self, segments):
         """Безопасное форматирование диаризованного текста с HTML и цветами"""
         try:
             if not segments or len(segments) == 0:
                 return "Нет сегментов для форматирования."
+
+            # Проверяем, нужно ли показывать временные метки
+            show_timestamps = self.settings.get('show_timestamps', False)
 
             # Цвета для спикеров
             speaker_colors = {
@@ -1145,6 +1295,7 @@ class ProfessionalTranscriptionWorker(QThread):
             current_speaker = None
             current_speaker_id = None
             current_texts = []
+            current_start_time = None
 
             for i, seg in enumerate(segments):
                 try:
@@ -1154,6 +1305,7 @@ class ProfessionalTranscriptionWorker(QThread):
                     speaker = str(seg.get('speaker', 'Неизвестный')).strip()[:50]
                     speaker_id = seg.get('speaker_id', 1)
                     text = str(seg.get('text', '')).strip()[:1000]
+                    start_time = seg.get('start', 0)
 
                     if not speaker or not text:
                         continue
@@ -1161,13 +1313,17 @@ class ProfessionalTranscriptionWorker(QThread):
                     if speaker != current_speaker:
                         if current_texts and current_speaker:
                             color = speaker_colors.get(current_speaker_id, '#667eea')
+                            time_html = ""
+                            if show_timestamps and current_start_time is not None:
+                                time_html = f'<span style="color: #64748b; font-size: 11px;">{self._format_time(current_start_time)} </span>'
                             speaker_html = f'<span style="color: {color}; font-weight: bold;">{current_speaker}:</span>'
                             text_html = f'<span style="color: #e2e8f0;"> {" ".join(current_texts)}</span>'
-                            formatted_parts.append(f'<p style="margin: 10px 0;">{speaker_html}{text_html}</p>')
+                            formatted_parts.append(f'<p style="margin: 10px 0;">{time_html}{speaker_html}{text_html}</p>')
 
                         current_speaker = speaker
                         current_speaker_id = speaker_id
                         current_texts = [text]
+                        current_start_time = start_time
                     else:
                         current_texts.append(text)
 
@@ -1180,9 +1336,12 @@ class ProfessionalTranscriptionWorker(QThread):
             # Добавляем последний блок
             if current_texts and current_speaker:
                 color = speaker_colors.get(current_speaker_id, '#667eea')
+                time_html = ""
+                if show_timestamps and current_start_time is not None:
+                    time_html = f'<span style="color: #64748b; font-size: 11px;">{self._format_time(current_start_time)} </span>'
                 speaker_html = f'<span style="color: {color}; font-weight: bold;">{current_speaker}:</span>'
                 text_html = f'<span style="color: #e2e8f0;"> {" ".join(current_texts)}</span>'
-                formatted_parts.append(f'<p style="margin: 10px 0;">{speaker_html}{text_html}</p>')
+                formatted_parts.append(f'<p style="margin: 10px 0;">{time_html}{speaker_html}{text_html}</p>')
 
             if not formatted_parts:
                 return "Не удалось сформатировать диаризованный текст."
@@ -1322,11 +1481,19 @@ class MainWindow(QMainWindow):
         main_layout.setSpacing(15)
         main_layout.setContentsMargins(20, 20, 20, 20)
 
-        # Заголовок
+        # Заголовок - единый контейнер с градиентом для исключения видимых швов
         header_container = QWidget()
+        header_container.setStyleSheet("""
+            QWidget#header_container {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #667eea, stop:0.5 #764ba2, stop:1 #a78bfa);
+                border-radius: 15px;
+            }
+        """)
+        header_container.setObjectName("header_container")
         header_layout = QVBoxLayout(header_container)
         header_layout.setSpacing(0)
-        header_layout.setContentsMargins(0,0,0,0)
+        header_layout.setContentsMargins(0, 0, 0, 0)
 
         title_label = QLabel("AUDIO/VIDEO TRANSCRIPTION PRO")
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1338,10 +1505,7 @@ class MainWindow(QMainWindow):
                 padding-top: 15px;
                 padding-bottom: 5px;
                 letter-spacing: 2px;
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #667eea, stop:0.5 #764ba2, stop:1 #a78bfa);
-                border-top-left-radius: 15px;
-                border-top-right-radius: 15px;
+                background: transparent;
             }
         """)
 
@@ -1353,10 +1517,7 @@ class MainWindow(QMainWindow):
                 color: rgba(255, 255, 255, 0.85);
                 padding-bottom: 12px;
                 padding-top: 2px;
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #667eea, stop:0.5 #764ba2, stop:1 #a78bfa);
-                border-bottom-left-radius: 15px;
-                border-bottom-right-radius: 15px;
+                background: transparent;
             }
         """)
 
@@ -1511,25 +1672,14 @@ class MainWindow(QMainWindow):
         file_buttons_layout.addWidget(self.clear_queue_btn)
         file_buttons_layout.addStretch()
 
-        # Список файлов с drag&drop
-        self.file_list_widget = FileListWidget()
-        self.file_list_widget.files_dropped.connect(self.add_files_to_queue)
-
-        # Подсказка для drag&drop
-        drag_drop_hint = QLabel("Перетащите файлы сюда или используйте кнопку добавления")
-        drag_drop_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        drag_drop_hint.setStyleSheet("""
-            QLabel {
-                color: #64748b;
-                font-style: italic;
-                padding: 8px;
-                background: transparent;
-            }
-        """)
+        # Зона для drag&drop файлов - вся область принимает файлы
+        self.drop_zone = DropZoneWidget()
+        self.drop_zone.files_dropped.connect(self.add_files_to_queue)
+        # Для совместимости используем file_list_widget как ссылку на внутренний список
+        self.file_list_widget = self.drop_zone.file_list
 
         file_layout.addLayout(file_buttons_layout)
-        file_layout.addWidget(drag_drop_hint)
-        file_layout.addWidget(self.file_list_widget)
+        file_layout.addWidget(self.drop_zone)
         file_group.setLayout(file_layout)
 
         # Контролы
@@ -1668,8 +1818,40 @@ class MainWindow(QMainWindow):
             }
         """)
 
-        # Кнопки сохранения
-        save_layout = QHBoxLayout()
+        # Кнопки сохранения в прокручиваемом контейнере
+        save_scroll_area = QScrollArea()
+        save_scroll_area.setWidgetResizable(True)
+        save_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        save_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        save_scroll_area.setMaximumHeight(55)
+        save_scroll_area.setStyleSheet("""
+            QScrollArea {
+                background: transparent;
+                border: none;
+            }
+            QScrollArea > QWidget > QWidget {
+                background: transparent;
+            }
+            QScrollBar:horizontal {
+                background: #1a1a2e;
+                height: 6px;
+                border-radius: 3px;
+            }
+            QScrollBar::handle:horizontal {
+                background: #667eea;
+                border-radius: 3px;
+                min-width: 20px;
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                width: 0px;
+            }
+        """)
+
+        save_widget = QWidget()
+        save_widget.setStyleSheet("background: transparent;")
+        save_layout = QHBoxLayout(save_widget)
+        save_layout.setContentsMargins(0, 0, 0, 0)
+
         self.save_txt_btn = self.create_save_button("💾 TXT", "#48bb78")
         self.save_docx_btn = self.create_save_button("📄 DOCX", "#4299e1")
         self.save_json_btn = self.create_save_button("📊 JSON", "#ed8936")
@@ -1681,8 +1863,10 @@ class MainWindow(QMainWindow):
         save_layout.addWidget(self.save_json_btn)
         save_layout.addWidget(self.save_all_btn)
 
+        save_scroll_area.setWidget(save_widget)
+
         result_layout.addWidget(self.result_text)
-        result_layout.addLayout(save_layout)
+        result_layout.addWidget(save_scroll_area)
         result_group.setLayout(result_layout)
 
         # Живая транскрипция
@@ -1769,29 +1953,16 @@ class MainWindow(QMainWindow):
         self.diarization_checkbox.setChecked(True)
 
         # Информация о диаризации
-        info_label = QLabel("Улучшенная диаризация с поддержкой до 10 спикеров")
+        info_label = QLabel("Автоматическое определение спикеров (до 10)")
         info_label.setStyleSheet("color: #56d364; font-size: 11px; margin: 5px 0px;")
         info_label.setWordWrap(True)
 
-        # Первый ряд параметров - количество спикеров
-        speakers_layout = QHBoxLayout()
+        # Чекбокс для отображения времени реплик
+        self.show_timestamps_checkbox = QCheckBox("Показывать время каждой реплики")
+        self.show_timestamps_checkbox.setChecked(False)
+        self.show_timestamps_checkbox.setToolTip("Добавлять временные метки к каждой реплике в результате")
 
-        speakers_layout.addWidget(QLabel("Макс. спикеров:"))
-        self.max_speakers_spin = QSpinBox()
-        self.max_speakers_spin.setMinimum(2)
-        self.max_speakers_spin.setMaximum(10)
-        self.max_speakers_spin.setValue(5)
-        self.max_speakers_spin.setToolTip("Максимальное количество спикеров для определения (2-10)")
-        self.max_speakers_spin.setStyleSheet("""
-            QSpinBox {
-                min-width: 60px;
-                padding: 4px 8px;
-            }
-        """)
-        speakers_layout.addWidget(self.max_speakers_spin)
-        speakers_layout.addStretch()
-
-        # Второй ряд параметров
+        # Параметры диаризации
         params_layout = QHBoxLayout()
 
         params_layout.addWidget(QLabel("Мин. пауза (сек):"))
@@ -1815,7 +1986,7 @@ class MainWindow(QMainWindow):
 
         diarization_layout.addWidget(self.diarization_checkbox)
         diarization_layout.addWidget(info_label)
-        diarization_layout.addLayout(speakers_layout)
+        diarization_layout.addWidget(self.show_timestamps_checkbox)
         diarization_layout.addLayout(params_layout)
         diarization_group.setLayout(diarization_layout)
 
@@ -2193,7 +2364,7 @@ class MainWindow(QMainWindow):
         # Включаем/выключаем параметры
         self.min_pause_spin.setEnabled(enabled)
         self.min_silence_spin.setEnabled(enabled)
-        self.max_speakers_spin.setEnabled(enabled)
+        self.show_timestamps_checkbox.setEnabled(enabled)
 
         self.log_widget.log(f"Диаризация {'включена' if enabled else 'отключена'}", "INFO")
 
@@ -2440,7 +2611,8 @@ class MainWindow(QMainWindow):
             'use_diarization': self.diarization_checkbox.isChecked(),
             'min_pause': float(self.min_pause_spin.value()),
             'min_silence': int(self.min_silence_spin.value()),
-            'max_speakers': int(self.max_speakers_spin.value())
+            'max_speakers': 10,  # Автоопределение - до 10 спикеров
+            'show_timestamps': self.show_timestamps_checkbox.isChecked()
         }
 
         # Список путей файлов
