@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "transcription-pro"
+version = "7.0.0"
+description = "Professional Audio/Video Transcription with Speaker Diarization"
+readme = "readme.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Lebedev Nikolay"}
+]
+requires-python = ">=3.9"
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+keywords = ["transcription", "whisper", "speech-to-text", "diarization", "audio", "video"]
+dependencies = [
+    "PySide6>=6.5.0",
+    "faster-whisper>=0.10.0",
+    "psutil>=5.9.0",
+]
+
+[project.optional-dependencies]
+docx = ["python-docx>=0.8.11"]
+gpu = ["torch>=2.0.0", "torchaudio>=2.0.0"]
+dev = ["pyinstaller>=6.0.0", "pytest>=7.0.0"]
+all = [
+    "python-docx>=0.8.11",
+    "torch>=2.0.0",
+    "torchaudio>=2.0.0",
+    "pyinstaller>=6.0.0",
+]
+
+[project.scripts]
+transcription-pro = "main:main"
+
+[project.gui-scripts]
+transcription-pro-gui = "main:main"
+
+[project.urls]
+Homepage = "https://github.com/alarianb/videoTranscribation"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.md", "*.txt"]
+
+[tool.pyinstaller]
+# Конфигурация для PyInstaller
+name = "TranscriptionPro"
+onefile = true
+windowed = true
+icon = "icon.ico"

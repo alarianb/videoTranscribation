@@ -1,0 +1,44 @@
+# Audio/Video Transcription Pro - Docker Compose
+#
+# Запуск:
+#   docker-compose up
+#
+# Сборка и запуск:
+#   docker-compose up --build
+
+version: '3.8'
+
+services:
+  transcription-pro:
+    build: .
+    image: transcription-pro:latest
+    container_name: transcription-pro
+
+    # Для GUI через X11 (Linux)
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_QPA_PLATFORM=xcb
+
+    volumes:
+      # X11 socket для GUI
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      # Данные (входные/выходные файлы)
+      - ./data:/app/data
+      # Кэш моделей (чтобы не скачивать заново)
+      - ./models:/root/.cache/whisper
+
+    # Для доступа к GPU (раскомментировать если есть NVIDIA GPU)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+    # Сеть не нужна, приложение локальное
+    network_mode: "none"
+
+    # Интерактивный режим для GUI
+    stdin_open: true
+    tty: true
