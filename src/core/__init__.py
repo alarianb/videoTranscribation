@@ -1,15 +1,33 @@
 """
-Core <>4C;L - 187=5A-;>38:0 ?@8;>65=8O
+Core модуль - бизнес-логика приложения
 """
 
-from .models import get_models_cache_dir, load_model, download_model
-from .audio import find_ffmpeg, extract_audio, check_ffmpeg
-from .transcription import transcribe_audio, validate_segment
+from .models import (
+    get_models_cache_dir, load_model, download_model,
+    is_model_downloaded, get_downloaded_models, get_model_info, get_all_models_info,
+    MODEL_REPO_MAPPING, MODEL_SIZES_MB
+)
+from .audio import (
+    find_ffmpeg, extract_audio, check_ffmpeg,
+    AUDIO_FILTER_PROFILES, DEFAULT_AUDIO_FILTER
+)
+from .transcription import (
+    transcribe_audio, validate_segment,
+    finalize_transcription, get_full_text
+)
 from .diarization import apply_diarization
 
 __all__ = [
+    # Models
     'get_models_cache_dir', 'load_model', 'download_model',
+    'is_model_downloaded', 'get_downloaded_models', 'get_model_info', 'get_all_models_info',
+    'MODEL_REPO_MAPPING', 'MODEL_SIZES_MB',
+    # Audio
     'find_ffmpeg', 'extract_audio', 'check_ffmpeg',
+    'AUDIO_FILTER_PROFILES', 'DEFAULT_AUDIO_FILTER',
+    # Transcription
     'transcribe_audio', 'validate_segment',
+    'finalize_transcription', 'get_full_text',
+    # Diarization
     'apply_diarization'
 ]

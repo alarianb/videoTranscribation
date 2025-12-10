@@ -2,7 +2,7 @@
 Логика транскрибации
 """
 
-from ..utils import CrashSafeMemoryManager, clean_text, format_time
+from ..utils import CrashSafeMemoryManager, clean_text, format_time, process_segment, post_process_text
 
 
 def transcribe_audio(audio_path: str, model, settings: dict,
@@ -61,6 +61,11 @@ def transcribe_audio(audio_path: str, model, settings: dict,
         if hasattr(info, 'language'):
             log(f"Определен язык: {info.language} ({info.language_probability:.0%})", "INFO")
 
+        # Определяем язык для постобработки
+        detected_language = settings.get('language', 'auto')
+        if hasattr(info, 'language'):
+            detected_language = info.language
+
         # Безопасная обработка сегментов
         segments_list = []
         total_segments = 0
@@ -70,7 +75,12 @@ def transcribe_audio(audio_path: str, model, settings: dict,
                 break
 
             try:
+                # Первичная очистка
                 text = clean_text(segment.text.strip())
+
+                # Постобработка: исправление ошибок ASR, повторений
+                text = process_segment(text, language=detected_language)
+
                 if text and len(text) > 2:
                     segments_list.append({
                         'start': float(segment.start),
@@ -124,3 +134,76 @@ def validate_segment(seg, index=0):
 
     except Exception:
         return False
+
+
+def finalize_transcription(segments: list, language: str = 'ru', options: dict = None) -> list:
+    """
+    Финальная постобработка всех сегментов
+
+    Применяет полную постобработку:
+    - Восстановление регистра
+    - Восстановление пунктуации
+    - Преобразование числительных в цифры
+    - Исправление ошибок ASR
+
+    Args:
+        segments: Список сегментов с текстом
+        language: Язык текста ('ru', 'en', 'auto')
+        options: Опции постобработки (см. post_process_text)
+
+    Returns:
+        list: Обработанные сегменты
+    """
+    if not segments:
+        return segments
+
+    processed_segments = []
+
+    for seg in segments:
+        try:
+            if not validate_segment(seg):
+                continue
+
+            text = seg.get('text', '')
+
+            # Применяем полную постобработку
+            processed_text = post_process_text(text, language=language, options=options)
+
+            if processed_text and len(processed_text) > 1:
+                processed_segments.append({
+                    'start': seg['start'],
+                    'end': seg['end'],
+                    'text': processed_text,
+                    'speaker': seg.get('speaker'),
+                    'speaker_id': seg.get('speaker_id')
+                })
+
+        except Exception:
+            # При ошибке сохраняем оригинал
+            processed_segments.append(seg)
+
+    return processed_segments
+
+
+def get_full_text(segments: list, language: str = 'ru') -> str:
+    """
+    Получить полный текст из сегментов с постобработкой
+
+    Args:
+        segments: Список сегментов
+        language: Язык текста
+
+    Returns:
+        str: Полный обработанный текст
+    """
+    if not segments:
+        return ""
+
+    # Собираем текст из всех сегментов
+    texts = [seg.get('text', '') for seg in segments if seg.get('text')]
+    full_text = ' '.join(texts)
+
+    # Применяем полную постобработку
+    processed = post_process_text(full_text, language=language)
+
+    return processed

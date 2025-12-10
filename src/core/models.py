@@ -5,11 +5,34 @@
 import sys
 import os
 from pathlib import Path
+from typing import Optional, Dict, List
 
 from ..utils import DEVICE, FASTER_WHISPER_AVAILABLE, CrashSafeMemoryManager
 
 if FASTER_WHISPER_AVAILABLE:
     from faster_whisper import WhisperModel
+
+# Mapping модели -> название в Hugging Face
+MODEL_REPO_MAPPING = {
+    "tiny": "Systran/faster-whisper-tiny",
+    "base": "Systran/faster-whisper-base",
+    "small": "Systran/faster-whisper-small",
+    "medium": "Systran/faster-whisper-medium",
+    "large": "Systran/faster-whisper-large-v3",
+    "large-v2": "Systran/faster-whisper-large-v2",
+    "large-v3": "Systran/faster-whisper-large-v3",
+}
+
+# Примерные размеры моделей в MB (для информации)
+MODEL_SIZES_MB = {
+    "tiny": 75,
+    "base": 145,
+    "small": 465,
+    "medium": 1500,
+    "large": 3100,
+    "large-v2": 3100,
+    "large-v3": 3100,
+}
 
 
 def get_models_cache_dir() -> Path:
@@ -20,6 +43,89 @@ def get_models_cache_dir() -> Path:
         cache_dir = Path.home() / ".cache" / "whisper"
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir
+
+
+def is_model_downloaded(model_name: str) -> bool:
+    """
+    Проверяет, скачана ли модель локально
+
+    Args:
+        model_name: Название модели (tiny, base, small, medium, large-v3)
+
+    Returns:
+        bool: True если модель уже скачана
+    """
+    cache_dir = get_models_cache_dir()
+
+    # Получаем имя репозитория
+    repo_name = MODEL_REPO_MAPPING.get(model_name, f"Systran/faster-whisper-{model_name}")
+
+    # faster-whisper использует huggingface_hub для кеширования
+    # Модели хранятся в формате: models--{org}--{name}
+    hf_cache_name = repo_name.replace("/", "--")
+    model_dir = cache_dir / f"models--{hf_cache_name}"
+
+    if model_dir.exists():
+        # Проверяем наличие основных файлов модели
+        snapshots_dir = model_dir / "snapshots"
+        if snapshots_dir.exists():
+            # Проверяем наличие хотя бы одного снэпшота с model.bin
+            for snapshot in snapshots_dir.iterdir():
+                if snapshot.is_dir():
+                    model_file = snapshot / "model.bin"
+                    if model_file.exists():
+                        return True
+
+    # Также проверяем старый формат (прямое имя)
+    old_format_dir = cache_dir / model_name
+    if old_format_dir.exists():
+        model_file = old_format_dir / "model.bin"
+        if model_file.exists():
+            return True
+
+    return False
+
+
+def get_downloaded_models() -> List[str]:
+    """
+    Возвращает список скачанных моделей
+
+    Returns:
+        List[str]: Список названий скачанных моделей
+    """
+    downloaded = []
+    for model_name in MODEL_REPO_MAPPING.keys():
+        if is_model_downloaded(model_name):
+            downloaded.append(model_name)
+    return downloaded
+
+
+def get_model_info(model_name: str) -> Dict:
+    """
+    Получить информацию о модели
+
+    Args:
+        model_name: Название модели
+
+    Returns:
+        Dict с информацией: downloaded, size_mb, repo
+    """
+    return {
+        "name": model_name,
+        "downloaded": is_model_downloaded(model_name),
+        "size_mb": MODEL_SIZES_MB.get(model_name, 0),
+        "repo": MODEL_REPO_MAPPING.get(model_name, f"Systran/faster-whisper-{model_name}")
+    }
+
+
+def get_all_models_info() -> List[Dict]:
+    """
+    Получить информацию обо всех моделях
+
+    Returns:
+        List[Dict]: Список с информацией о каждой модели
+    """
+    return [get_model_info(name) for name in MODEL_REPO_MAPPING.keys()]
 
 
 def load_model(model_size: str, log_func=None):
@@ -89,7 +195,7 @@ def load_model(model_size: str, log_func=None):
             raise fallback_e
 
 
-def download_model(model_name: str, progress_callback=None, log_func=None):
+def download_model(model_name: str, progress_callback=None, log_func=None, force=False):
     """
     Скачивание модели Whisper
 
@@ -97,6 +203,7 @@ def download_model(model_name: str, progress_callback=None, log_func=None):
         model_name: Название модели
         progress_callback: Функция для отчета о прогрессе (value, message)
         log_func: Функция для логирования
+        force: Принудительно скачать, даже если модель уже есть
 
     Returns:
         bool: True если успешно, False если ошибка
@@ -115,8 +222,18 @@ def download_model(model_name: str, progress_callback=None, log_func=None):
             progress_callback(value, message)
 
     try:
-        log(f"Скачивание модели {model_name}...", "INFO")
-        progress(10, "Проверка модели...")
+        progress(5, "Проверка наличия модели...")
+
+        # Проверяем, скачана ли модель
+        if not force and is_model_downloaded(model_name):
+            model_info = get_model_info(model_name)
+            log(f"Модель {model_name} ({model_info['size_mb']} MB) уже скачана", "INFO")
+            progress(100, "Модель уже установлена!")
+            return True
+
+        size_mb = MODEL_SIZES_MB.get(model_name, 0)
+        log(f"Скачивание модели {model_name} (~{size_mb} MB)...", "INFO")
+        progress(10, f"Скачивание {model_name} (~{size_mb} MB)...")
 
         progress(30, "Загрузка модели...")
 
@@ -142,6 +259,7 @@ def download_model(model_name: str, progress_callback=None, log_func=None):
         CrashSafeMemoryManager.safe_gpu_cleanup("after model download")
 
         progress(100, "Модель готова!")
+        log(f"Модель {model_name} успешно загружена", "SUCCESS")
         return True
 
     except Exception as e:
