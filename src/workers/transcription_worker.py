@@ -13,7 +13,7 @@ from PySide6.QtCore import QThread, Signal
 from ..utils import CrashSafeMemoryManager, format_simple_text
 from ..core import (
     load_model, extract_audio, transcribe_audio,
-    apply_diarization, validate_segment
+    apply_diarization, validate_segment, finalize_transcription
 )
 
 
@@ -96,7 +96,9 @@ class TranscriptionWorker(QThread):
                 base_progress + step_progress * 10 // 100,
                 f"[{self.current_file_index+1}/{len(self.file_paths)}] Извлечение аудио..."
             )
-            extract_audio(file_path, output_audio, self._log)
+            # Используем профиль фильтров из настроек (по умолчанию "soft")
+            filter_profile = self.settings.get('audio_filter', 'soft')
+            extract_audio(file_path, output_audio, self._log, filter_profile=filter_profile)
 
             if not self._is_running:
                 return None
@@ -148,6 +150,35 @@ class TranscriptionWorker(QThread):
             if not segments:
                 self.log_signal.emit("Сегменты не получены, возможно аудио слишком тихое", "WARNING")
                 return "Не удалось получить сегменты из аудио. Проверьте качество записи."
+
+            # Этап 3.5: Финальная постобработка текста
+            self.progress_signal.emit(
+                base_progress + step_progress * 60 // 100,
+                f"[{self.current_file_index+1}/{len(self.file_paths)}] Постобработка текста..."
+            )
+
+            # Определяем язык для постобработки
+            detected_language = self.settings.get('language', 'ru')
+            if detected_language == 'auto':
+                detected_language = 'ru'  # Fallback
+
+            # Опции постобработки из настроек
+            postprocess_options = {
+                'fix_case': self.settings.get('fix_case', True),
+                'fix_punctuation': self.settings.get('fix_punctuation', True),
+                'convert_numbers': self.settings.get('convert_numbers', True),
+                'fix_asr': self.settings.get('fix_asr', True),
+                'clean_repetitions': self.settings.get('clean_repetitions', True),
+            }
+
+            # Применяем финальную постобработку
+            segments = finalize_transcription(
+                segments,
+                language=detected_language,
+                options=postprocess_options
+            )
+
+            self.log_signal.emit(f"Постобработка завершена: {len(segments)} сегментов", "INFO")
 
             # Этап 4: Диаризация или простое форматирование
             formatted_text = ""
