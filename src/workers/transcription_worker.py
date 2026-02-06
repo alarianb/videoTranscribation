@@ -187,10 +187,12 @@ class TranscriptionWorker(QThread):
                     base_progress + step_progress * 70 // 100,
                     f"[{self.current_file_index+1}/{len(self.file_paths)}] Диаризация..."
                 )
+                # Передаём audio_path для pyannote диаризации
                 formatted_text = apply_diarization(
                     segments, self.settings,
                     log_func=self._log,
-                    running_check=self._is_running_check
+                    running_check=self._is_running_check,
+                    audio_path=output_audio  # Путь к извлечённому аудио для pyannote
                 )
             else:
                 formatted_text = format_simple_text(segments, validate_segment)

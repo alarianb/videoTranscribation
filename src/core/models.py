@@ -34,6 +34,39 @@ MODEL_SIZES_MB = {
     "large-v3": 3100,
 }
 
+# ============================================
+# Кеширование модели в памяти
+# ============================================
+_cached_model = None
+_cached_model_name = None
+_cached_model_device = None
+
+
+def get_cached_model():
+    """Возвращает кешированную модель, если есть"""
+    return _cached_model, _cached_model_name
+
+
+def clear_model_cache(log_func=None):
+    """Очищает кеш модели из памяти"""
+    global _cached_model, _cached_model_name, _cached_model_device
+
+    def log(msg, level="INFO"):
+        if log_func:
+            log_func(msg, level)
+
+    if _cached_model is not None:
+        try:
+            model_name = _cached_model_name
+            del _cached_model
+            _cached_model = None
+            _cached_model_name = None
+            _cached_model_device = None
+            CrashSafeMemoryManager.safe_gpu_cleanup("after model cache clear")
+            log(f"Модель {model_name} выгружена из кеша", "INFO")
+        except Exception as e:
+            log(f"Ошибка очистки кеша модели: {e}", "WARNING")
+
 
 def get_models_cache_dir() -> Path:
     """Получить директорию для кэша моделей"""
@@ -128,17 +161,20 @@ def get_all_models_info() -> List[Dict]:
     return [get_model_info(name) for name in MODEL_REPO_MAPPING.keys()]
 
 
-def load_model(model_size: str, log_func=None):
+def load_model(model_size: str, log_func=None, use_cache: bool = True):
     """
-    Безопасная загрузка модели Whisper
+    Безопасная загрузка модели Whisper с кешированием
 
     Args:
         model_size: Размер модели (tiny, base, small, medium, large-v3)
         log_func: Функция для логирования (опционально)
+        use_cache: Использовать кеширование модели (по умолчанию True)
 
     Returns:
         WhisperModel или None при ошибке
     """
+    global _cached_model, _cached_model_name, _cached_model_device
+
     if not FASTER_WHISPER_AVAILABLE:
         raise RuntimeError("faster-whisper не установлен!")
 
@@ -147,6 +183,16 @@ def load_model(model_size: str, log_func=None):
             log_func(msg, level)
         else:
             print(f"[{level}] {msg}")
+
+    # Проверяем кеш
+    if use_cache and _cached_model is not None:
+        if _cached_model_name == model_size and _cached_model_device == DEVICE:
+            log(f"Используем кешированную модель {model_size}", "INFO")
+            return _cached_model
+        else:
+            # Нужна другая модель - очищаем кеш
+            log(f"Выгружаем модель {_cached_model_name} для загрузки {model_size}", "INFO")
+            clear_model_cache(log_func)
 
     try:
         compute_type = "float16" if DEVICE == "cuda" else "int8"
@@ -162,7 +208,7 @@ def load_model(model_size: str, log_func=None):
             except:
                 pass
 
-        log(f"Создание модели с {compute_type}", "INFO")
+        log(f"Загрузка модели {model_size} ({compute_type})...", "INFO")
 
         model = WhisperModel(
             model_size,
@@ -173,7 +219,15 @@ def load_model(model_size: str, log_func=None):
             download_root=get_models_cache_dir()
         )
 
-        log(f"Модель загружена (compute_type: {compute_type})", "SUCCESS")
+        # Кешируем модель
+        if use_cache:
+            _cached_model = model
+            _cached_model_name = model_size
+            _cached_model_device = DEVICE
+            log(f"Модель {model_size} загружена и закеширована", "SUCCESS")
+        else:
+            log(f"Модель {model_size} загружена (без кеширования)", "SUCCESS")
+
         return model
 
     except Exception as e:

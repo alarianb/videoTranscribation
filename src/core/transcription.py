@@ -1,8 +1,12 @@
 """
-Логика транскрибации
+Логика транскрибации с улучшенными параметрами Whisper
 """
 
-from ..utils import CrashSafeMemoryManager, clean_text, format_time, process_segment, post_process_text
+from ..utils import (
+    CrashSafeMemoryManager, clean_text, format_time,
+    process_segment, post_process_text,
+    WHISPER_TEMPERATURE, WHISPER_INITIAL_PROMPTS
+)
 
 
 def transcribe_audio(audio_path: str, model, settings: dict,
@@ -33,29 +37,50 @@ def transcribe_audio(audio_path: str, model, settings: dict,
         return True
 
     try:
-        segments, info = model.transcribe(
-            audio_path,
-            language=settings['language'] if settings['language'] != 'auto' else None,
+        # Определяем язык и промпт
+        language = settings.get('language', 'auto')
+        lang_for_whisper = language if language != 'auto' else None
+
+        # Выбираем initial_prompt на основе языка
+        initial_prompt = settings.get('initial_prompt')
+        if not initial_prompt and language in WHISPER_INITIAL_PROMPTS:
+            initial_prompt = WHISPER_INITIAL_PROMPTS[language]
+
+        # Temperature: используем fallback для сложных сегментов
+        # Если первая температура не даёт хорошего результата, пробуем следующую
+        temperature = settings.get('temperature', WHISPER_TEMPERATURE)
+
+        # VAD параметры
+        vad_threshold = settings.get('vad_threshold', 0.5)
+        min_silence_ms = settings.get('min_silence', 800)  # Уменьшено с 1000
+
+        log(f"Параметры: lang={language}, temp={temperature[0] if isinstance(temperature, tuple) else temperature}", "INFO")
+
+        # Базовые параметры транскрипции
+        transcribe_params = dict(
+            language=lang_for_whisper,
             task="transcribe",
             beam_size=5,
             best_of=5,
-            patience=1,
-            temperature=0.0,
-            initial_prompt="Это транскрипция на русском языке." if settings['language'] == 'ru' else None,
+            patience=1.0,
+            temperature=temperature,
+            initial_prompt=initial_prompt,
             word_timestamps=True,
             vad_filter=True,
             vad_parameters=dict(
-                threshold=0.5,
+                threshold=vad_threshold,
                 min_speech_duration_ms=250,
                 max_speech_duration_s=float('inf'),
-                min_silence_duration_ms=settings.get('min_silence', 1000),
+                min_silence_duration_ms=min_silence_ms,
                 speech_pad_ms=400
             ),
-            condition_on_previous_text=False,
+            condition_on_previous_text=True,
             compression_ratio_threshold=2.4,
             log_prob_threshold=-1.0,
-            no_speech_threshold=0.6
+            no_speech_threshold=0.6,
         )
+
+        segments, info = model.transcribe(audio_path, **transcribe_params)
 
         # Язык
         if hasattr(info, 'language'):

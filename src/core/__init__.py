@@ -5,6 +5,7 @@ Core модуль - бизнес-логика приложения
 from .models import (
     get_models_cache_dir, load_model, download_model,
     is_model_downloaded, get_downloaded_models, get_model_info, get_all_models_info,
+    get_cached_model, clear_model_cache,
     MODEL_REPO_MAPPING, MODEL_SIZES_MB
 )
 from .audio import (
@@ -21,6 +22,7 @@ __all__ = [
     # Models
     'get_models_cache_dir', 'load_model', 'download_model',
     'is_model_downloaded', 'get_downloaded_models', 'get_model_info', 'get_all_models_info',
+    'get_cached_model', 'clear_model_cache',
     'MODEL_REPO_MAPPING', 'MODEL_SIZES_MB',
     # Audio
     'find_ffmpeg', 'extract_audio', 'check_ffmpeg',

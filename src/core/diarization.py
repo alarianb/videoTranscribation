@@ -1,23 +1,40 @@
 """
 Логика диаризации спикеров
+
+Поддерживает два backend:
+- pyannote: Использует pyannote-audio для точной диаризации (требует HF токен)
+- heuristic: Эвристический метод на основе пауз и текстовых признаков
 """
 
 from ..utils import (
     CrashSafeMemoryManager, SPEAKER_COLORS,
-    format_simple_text, format_diarized_text
+    format_simple_text, format_diarized_text,
+    get_diarization_backend, PYANNOTE_AVAILABLE
 )
 from .transcription import validate_segment
 
 
-def apply_diarization(segments: list, settings: dict, log_func=None, running_check=None):
+def apply_diarization(
+    segments: list,
+    settings: dict,
+    log_func=None,
+    running_check=None,
+    audio_path: str = None
+):
     """
     Применение диаризации к сегментам
 
     Args:
         segments: Список сегментов с text, start, end
-        settings: Настройки диаризации (min_pause, max_speakers, show_timestamps)
+        settings: Настройки диаризации:
+            - min_pause: минимальная пауза для смены спикера (heuristic)
+            - max_speakers: максимум спикеров
+            - show_timestamps: показывать временные метки
+            - diarization_backend: "auto", "pyannote", "heuristic"
+            - hf_token: HuggingFace токен для pyannote
         log_func: Функция логирования
         running_check: Функция проверки, нужно ли продолжать
+        audio_path: Путь к аудио файлу (требуется для pyannote)
 
     Returns:
         str: Отформатированный текст с разделением по спикерам (HTML)
@@ -33,8 +50,97 @@ def apply_diarization(segments: list, settings: dict, log_func=None, running_che
             return running_check()
         return True
 
+    # Определяем backend
+    backend = settings.get('diarization_backend', 'auto')
+    if backend == 'auto':
+        backend = get_diarization_backend()
+
+    log(f"Backend диаризации: {backend}", "INFO")
+
     try:
-        log("Применение улучшенной диаризации...", "INFO")
+        # Пробуем pyannote если выбран и доступен
+        if backend == 'pyannote' and audio_path and PYANNOTE_AVAILABLE:
+            result = _apply_pyannote_diarization(
+                segments, settings, audio_path, log_func, running_check
+            )
+            if result:
+                return result
+            log("pyannote не сработал, переключаемся на heuristic", "WARNING")
+
+        # Fallback на heuristic
+        return _apply_heuristic_diarization(segments, settings, log_func, running_check)
+
+    except Exception as e:
+        log(f"Ошибка диаризации: {e}", "ERROR")
+        CrashSafeMemoryManager.safe_gpu_cleanup("after diarization error")
+        return format_simple_text(segments, validate_segment)
+
+
+def _apply_pyannote_diarization(segments, settings, audio_path, log_func, running_check):
+    """Диаризация с использованием pyannote-audio"""
+    def log(msg, level="INFO"):
+        if log_func:
+            log_func(msg, level)
+
+    try:
+        from .diarization_pyannote import (
+            diarize_audio, align_transcription_with_diarization
+        )
+
+        log("Запуск pyannote диаризации...", "INFO")
+
+        max_speakers = int(settings.get('max_speakers', 5))
+        hf_token = settings.get('hf_token')
+
+        # Получаем сегменты диаризации
+        diar_segments = diarize_audio(
+            audio_path,
+            max_speakers=max_speakers,
+            hf_token=hf_token,
+            log_func=log_func
+        )
+
+        if not diar_segments:
+            log("pyannote не вернул сегментов", "WARNING")
+            return None
+
+        # Совмещаем с транскрипцией
+        aligned_segments = align_transcription_with_diarization(
+            segments, diar_segments, log_func
+        )
+
+        if not aligned_segments:
+            return None
+
+        unique_speakers = len(set(seg['speaker'] for seg in aligned_segments))
+        log(f"pyannote диаризация: {len(aligned_segments)} сегментов, {unique_speakers} спикеров", "SUCCESS")
+
+        show_timestamps = settings.get('show_timestamps', False)
+        return format_diarized_text(aligned_segments, show_timestamps)
+
+    except ImportError:
+        log("Модуль pyannote не импортирован", "WARNING")
+        return None
+    except Exception as e:
+        log(f"Ошибка pyannote: {e}", "ERROR")
+        return None
+
+
+def _apply_heuristic_diarization(segments, settings, log_func, running_check):
+    """Эвристическая диаризация (fallback)"""
+    def log(msg, level="INFO"):
+        if log_func:
+            log_func(msg, level)
+        else:
+            print(f"[{level}] {msg}")
+
+    def is_running():
+        if running_check:
+            return running_check()
+        return True
+
+    try:
+        log("Применение эвристической диаризации...", "INFO")
 
         if not segments or len(segments) == 0:
             log("Нет сегментов для диаризации", "WARNING")
@@ -98,13 +204,13 @@ def apply_diarization(segments: list, settings: dict, log_func=None, running_che
             return format_simple_text(segments, validate_segment)
 
         unique_speakers = len(set(seg['speaker'] for seg in diarized_segments))
-        log(f"Диаризация завершена: {len(diarized_segments)} сегментов, {unique_speakers} спикеров", "SUCCESS")
+        log(f"Эвристическая диаризация: {len(diarized_segments)} сегментов, {unique_speakers} спикеров", "SUCCESS")
 
         show_timestamps = settings.get('show_timestamps', False)
         return format_diarized_text(diarized_segments, show_timestamps)
 
     except Exception as e:
-        log(f"Ошибка диаризации: {e}", "ERROR")
+        log(f"Ошибка эвристической диаризации: {e}", "ERROR")
         CrashSafeMemoryManager.safe_gpu_cleanup("after diarization error")
         return format_simple_text(segments, validate_segment)
 

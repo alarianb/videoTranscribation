@@ -12,9 +12,35 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 # Константы приложения
 APP_NAME = "Audio/Video Transcription Pro"
-APP_VERSION = "7.0-MODULAR"
+APP_VERSION = "8.0-ENHANCED"
 AUTHOR = "Lebedev Nikolay"
-DEFAULT_HF_TOKEN = ""
+
+# HuggingFace токен для pyannote (можно задать через переменную окружения)
+DEFAULT_HF_TOKEN = os.environ.get("HF_TOKEN", "")
+
+# ============================================
+# Настройки диаризации
+# ============================================
+# Backend: "pyannote" (лучшее качество), "heuristic" (без зависимостей)
+DIARIZATION_BACKEND = os.environ.get("DIARIZATION_BACKEND", "auto")  # auto, pyannote, heuristic
+
+# Модель pyannote для диаризации
+PYANNOTE_MODEL = "pyannote/speaker-diarization-3.1"
+
+# ============================================
+# Настройки Whisper
+# ============================================
+# Temperature fallback для сложных сегментов
+WHISPER_TEMPERATURE = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
+
+# Промпты для разных языков (улучшают качество)
+WHISPER_INITIAL_PROMPTS = {
+    'ru': "Транскрипция русской речи с правильной пунктуацией.",
+    'en': "Transcription of English speech with proper punctuation.",
+    'uk': "Транскрипція української мови з правильною пунктуацією.",
+    'de': "Transkription deutscher Sprache mit korrekter Interpunktion.",
+    'fr': "Transcription de la parole française avec ponctuation correcte.",
+}
 
 # Поддерживаемые форматы файлов
 SUPPORTED_FORMATS = [
@@ -73,3 +99,26 @@ except ImportError:
     TORCH_AVAILABLE = False
     DEVICE = "cpu"
     print("PyTorch не установлен - CPU режим")
+
+# Проверка pyannote-audio
+PYANNOTE_AVAILABLE = False
+try:
+    from pyannote.audio import Pipeline
+    PYANNOTE_AVAILABLE = True
+    print("pyannote-audio: доступен")
+except ImportError:
+    PYANNOTE_AVAILABLE = False
+    print("pyannote-audio не установлен - используется эвристическая диаризация")
+
+# Автоматический выбор backend диаризации
+def get_diarization_backend():
+    """Определяет лучший доступный backend для диаризации"""
+    if DIARIZATION_BACKEND == "pyannote" and PYANNOTE_AVAILABLE:
+        return "pyannote"
+    elif DIARIZATION_BACKEND == "heuristic":
+        return "heuristic"
+    elif DIARIZATION_BACKEND == "auto":
+        if PYANNOTE_AVAILABLE and DEFAULT_HF_TOKEN:
+            return "pyannote"
+        return "heuristic"
+    return "heuristic"
