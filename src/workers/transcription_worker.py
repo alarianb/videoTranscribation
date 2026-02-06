@@ -13,7 +13,8 @@ from PySide6.QtCore import QThread, Signal
 from ..utils import CrashSafeMemoryManager, format_simple_text
 from ..core import (
     load_model, extract_audio, transcribe_audio,
-    apply_diarization, validate_segment, finalize_transcription
+    apply_diarization, validate_segment, finalize_transcription,
+    load_nemo_model, transcribe_nemo_audio
 )
 
 
@@ -84,6 +85,7 @@ class TranscriptionWorker(QThread):
         """Обработка одного файла"""
         model = None
         try:
+            asr_backend = self.settings.get("asr_backend", "whisper")
             # Создаем временную директорию
             self.temp_dir = tempfile.TemporaryDirectory()
             output_audio = os.path.join(self.temp_dir.name, "audio.wav")
@@ -111,7 +113,10 @@ class TranscriptionWorker(QThread):
                 base_progress + step_progress * 20 // 100,
                 f"[{self.current_file_index+1}/{len(self.file_paths)}] Загрузка модели..."
             )
-            model = load_model(self.settings['model_size'], self._log)
+            if asr_backend == "nemo":
+                model = load_nemo_model(self.settings['nemo_model'], self._log)
+            else:
+                model = load_model(self.settings['model_size'], self._log)
 
             if not self._is_running:
                 if model:
@@ -125,12 +130,17 @@ class TranscriptionWorker(QThread):
                 base_progress + step_progress * 30 // 100,
                 f"[{self.current_file_index+1}/{len(self.file_paths)}] Распознавание речи..."
             )
-            segments = transcribe_audio(
-                output_audio, model, self.settings,
-                log_func=self._log,
-                segment_callback=self._on_segment,
-                running_check=self._is_running_check
-            )
+            if asr_backend == "nemo":
+                segments = transcribe_nemo_audio(
+                    output_audio, model, self.settings, log_func=self._log
+                )
+            else:
+                segments = transcribe_audio(
+                    output_audio, model, self.settings,
+                    log_func=self._log,
+                    segment_callback=self._on_segment,
+                    running_check=self._is_running_check
+                )
 
             # Безопасно освобождаем модель
             if model:
@@ -182,7 +192,15 @@ class TranscriptionWorker(QThread):
 
             # Этап 4: Диаризация или простое форматирование
             formatted_text = ""
-            if self.settings.get('use_diarization'):
+            use_diarization = self.settings.get('use_diarization')
+            if asr_backend == "nemo" and use_diarization:
+                self.log_signal.emit(
+                    "NeMo не предоставляет таймкоды сегментов - диаризация отключена",
+                    "WARNING"
+                )
+                use_diarization = False
+
+            if use_diarization:
                 self.progress_signal.emit(
                     base_progress + step_progress * 70 // 100,
                     f"[{self.current_file_index+1}/{len(self.file_paths)}] Диаризация..."

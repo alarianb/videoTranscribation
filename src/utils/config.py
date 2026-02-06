@@ -5,6 +5,7 @@
 import sys
 import os
 import warnings
+import importlib.util
 
 # Отключаем предупреждения
 warnings.filterwarnings("ignore")
@@ -73,6 +74,12 @@ FASTER_WHISPER_AVAILABLE = False
 DOCX_AVAILABLE = False
 TORCH_AVAILABLE = False
 DEVICE = "cpu"
+NEMO_AVAILABLE = False
+NEMO_DEFAULT_MODEL = "stt_en_conformer_ctc_large"
+NEMO_CONFORMER_MODELS = [
+    ("English (Conformer CTC Large)", "stt_en_conformer_ctc_large"),
+    ("Russian (Conformer CTC Large)", "stt_ru_conformer_ctc_large"),
+]
 
 try:
     from faster_whisper import WhisperModel
@@ -99,6 +106,10 @@ except ImportError:
     TORCH_AVAILABLE = False
     DEVICE = "cpu"
     print("PyTorch не установлен - CPU режим")
+
+# Проверка NVIDIA NeMo (без try/except вокруг импортов)
+if importlib.util.find_spec("nemo.collections.asr") is not None:
+    NEMO_AVAILABLE = True
 
 # Проверка pyannote-audio
 PYANNOTE_AVAILABLE = False
