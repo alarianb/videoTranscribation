@@ -4,8 +4,12 @@
 Требует:
 - pyannote-audio>=3.1.0
 - HuggingFace токен с доступом к модели pyannote/speaker-diarization-3.1
+
+ВНИМАНИЕ: pyannote требует ~2-4GB RAM на CPU. При нехватке памяти
+используйте эвристическую диаризацию.
 """
 
+import gc
 from typing import List, Dict, Optional, Callable
 from ..utils import (
     PYANNOTE_AVAILABLE, DEFAULT_HF_TOKEN, PYANNOTE_MODEL,
@@ -24,6 +28,16 @@ _pipeline_device = None
 def is_pyannote_ready() -> bool:
     """Проверяет, готов ли pyannote к использованию"""
     return PYANNOTE_AVAILABLE and bool(DEFAULT_HF_TOKEN)
+
+
+def check_memory_available(required_gb: float = 2.0) -> bool:
+    """Проверяет, достаточно ли памяти для pyannote"""
+    try:
+        import psutil
+        available_gb = psutil.virtual_memory().available / (1024 ** 3)
+        return available_gb >= required_gb
+    except:
+        return True  # Если не можем проверить, пробуем
 
 
 def load_diarization_pipeline(
@@ -59,6 +73,11 @@ def load_diarization_pipeline(
         log("HuggingFace токен не указан! Установите HF_TOKEN или передайте токен", "ERROR")
         return None
 
+    # Проверяем доступную память
+    if not check_memory_available(2.0):
+        log("Недостаточно памяти для pyannote (нужно ~2GB). Используйте heuristic.", "ERROR")
+        return None
+
     # Определяем устройство
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -69,9 +88,11 @@ def load_diarization_pipeline(
         return _diarization_pipeline
 
     try:
-        log(f"Загрузка pyannote модели {PYANNOTE_MODEL}...", "INFO")
+        log(f"Загрузка pyannote модели {PYANNOTE_MODEL} ({device})...", "INFO")
+        log("ВНИМАНИЕ: pyannote требует ~2-4GB RAM", "WARNING")
 
         # Очистка памяти перед загрузкой
+        gc.collect()
         CrashSafeMemoryManager.safe_gpu_cleanup("before pyannote load")
 
         pipeline = Pipeline.from_pretrained(

@@ -69,12 +69,26 @@ def clear_model_cache(log_func=None):
 
 
 def get_models_cache_dir() -> Path:
-    """Получить директорию для кэша моделей"""
+    """
+    Получить единую директорию для кэша моделей
+
+    Все модели хранятся в одном месте:
+    - Windows: %LOCALAPPDATA%/WhisperModels
+    - Linux/Mac: ~/.cache/whisper
+
+    Также устанавливает HF_HOME для huggingface_hub
+    """
     if sys.platform == "win32":
         cache_dir = Path.home() / "AppData" / "Local" / "WhisperModels"
     else:
         cache_dir = Path.home() / ".cache" / "whisper"
+
     cache_dir.mkdir(parents=True, exist_ok=True)
+
+    # Устанавливаем единый путь для huggingface_hub
+    os.environ["HF_HOME"] = str(cache_dir)
+    os.environ["HUGGINGFACE_HUB_CACHE"] = str(cache_dir)
+
     return cache_dir
 
 
