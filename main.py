@@ -16,7 +16,7 @@ import sys
 
 from PySide6.QtWidgets import QApplication, QMessageBox, QStyleFactory
 
-from src.utils import APP_NAME, APP_VERSION, AUTHOR, FASTER_WHISPER_AVAILABLE
+from src.utils import APP_NAME, APP_VERSION, AUTHOR, FASTER_WHISPER_AVAILABLE, NEMO_AVAILABLE
 from src.ui import MainWindow
 from src.ui.dialogs import AboutDialog
 
@@ -30,12 +30,13 @@ def main():
         app.setApplicationVersion(APP_VERSION)
 
         # Проверка критических зависимостей
-        if not FASTER_WHISPER_AVAILABLE:
+        if not FASTER_WHISPER_AVAILABLE and not NEMO_AVAILABLE:
             QMessageBox.critical(
                 None, "Критическая ошибка",
-                "faster-whisper не установлен!\n\n"
-                "Установите командой:\n"
-                "pip install faster-whisper"
+                "Не найдено ни одного ASR движка!\n\n"
+                "Установите хотя бы один из них:\n"
+                "pip install faster-whisper\n"
+                "pip install nemo_toolkit[asr]"
             )
             sys.exit(1)
 

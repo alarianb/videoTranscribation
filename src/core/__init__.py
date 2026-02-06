@@ -16,6 +16,7 @@ from .transcription import (
     transcribe_audio, validate_segment,
     finalize_transcription, get_full_text
 )
+from .nemo_asr import load_nemo_model, transcribe_nemo_audio
 from .diarization import apply_diarization
 
 __all__ = [
@@ -30,6 +31,7 @@ __all__ = [
     # Transcription
     'transcribe_audio', 'validate_segment',
     'finalize_transcription', 'get_full_text',
+    'load_nemo_model', 'transcribe_nemo_audio',
     # Diarization
     'apply_diarization'
 ]

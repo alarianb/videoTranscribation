@@ -33,6 +33,13 @@ pyinstaller>=6.0.0
 # speechbrain>=1.0.0
 
 # ============================================
+# OPTIONAL: NVIDIA NeMo ASR (Conformer)
+# ============================================
+# nemo_toolkit[asr]>=1.22.0
+#
+# Note: NeMo requires PyTorch and CUDA for GPU acceleration.
+
+# ============================================
 # OPTIONAL: Audio preprocessing improvements
 # ============================================
 # noisereduce>=3.0.0  # Noise reduction

@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QLabel, QTextEdit, QPushButton,
     QFileDialog, QVBoxLayout, QHBoxLayout, QGroupBox,
     QMessageBox, QProgressBar, QComboBox, QCheckBox,
-    QSpinBox, QTabWidget, QTextBrowser, QSplitter,
+    QSpinBox, QTabWidget, QTextBrowser, QSplitter, QLineEdit,
     QListWidgetItem, QScrollArea, QTimer
 )
 from PySide6.QtCore import Qt, Slot
@@ -24,7 +24,8 @@ from PySide6.QtGui import QTextCursor, QDragEnterEvent, QDropEvent
 from ..utils import (
     APP_NAME, APP_VERSION, AUTHOR, SUPPORTED_FORMATS,
     FASTER_WHISPER_AVAILABLE, DOCX_AVAILABLE, TORCH_AVAILABLE, DEVICE,
-    PYANNOTE_AVAILABLE, DEFAULT_HF_TOKEN
+    PYANNOTE_AVAILABLE, DEFAULT_HF_TOKEN, NEMO_AVAILABLE,
+    NEMO_DEFAULT_MODEL, NEMO_CONFORMER_MODELS
 )
 from ..core import get_models_cache_dir, check_ffmpeg
 from ..workers import ModelDownloader, TranscriptionWorker
@@ -58,11 +59,13 @@ class MainWindow(QMainWindow):
         # Темная тема
         self.setStyleSheet(get_dark_theme())
 
-        if not FASTER_WHISPER_AVAILABLE:
+        if not FASTER_WHISPER_AVAILABLE and not NEMO_AVAILABLE:
             QMessageBox.critical(
                 self, "Критическая ошибка",
-                "faster_whisper не установлен!\n\n"
-                "Установите: pip install faster-whisper"
+                "Не найдено ни одного ASR движка!\n\n"
+                "Установите хотя бы один из них:\n"
+                "pip install faster-whisper\n"
+                "pip install nemo_toolkit[asr]"
             )
             sys.exit(1)
 
@@ -474,6 +477,20 @@ class MainWindow(QMainWindow):
         basic_group = QGroupBox("⚙️ ОСНОВНЫЕ НАСТРОЙКИ")
         basic_layout = QVBoxLayout()
 
+        backend_layout = QHBoxLayout()
+        backend_layout.addWidget(QLabel("ASR движок:"))
+        self.asr_backend_combo = QComboBox()
+        self.asr_backend_combo.addItem("whisper - faster-whisper (рекомендуется)", "whisper")
+        self.asr_backend_combo.addItem("nemo - NVIDIA NeMo Conformer", "nemo")
+        if not FASTER_WHISPER_AVAILABLE:
+            self.asr_backend_combo.setItemData(0, 0, Qt.ItemDataRole.UserRole - 1)
+        if not NEMO_AVAILABLE:
+            self.asr_backend_combo.setItemData(1, 0, Qt.ItemDataRole.UserRole - 1)
+        if not FASTER_WHISPER_AVAILABLE and NEMO_AVAILABLE:
+            self.asr_backend_combo.setCurrentIndex(1)
+        backend_layout.addWidget(self.asr_backend_combo)
+        backend_layout.addStretch()
+
         lang_layout = QHBoxLayout()
         lang_layout.addWidget(QLabel("Язык:"))
         self.language_combo = QComboBox()
@@ -482,8 +499,10 @@ class MainWindow(QMainWindow):
         lang_layout.addWidget(self.language_combo)
         lang_layout.addStretch()
 
-        model_layout = QHBoxLayout()
-        model_layout.addWidget(QLabel("Модель:"))
+        self.whisper_model_container = QWidget()
+        model_layout = QHBoxLayout(self.whisper_model_container)
+        model_layout.setContentsMargins(0, 0, 0, 0)
+        model_layout.addWidget(QLabel("Модель Whisper:"))
         self.model_combo = QComboBox()
         models = [
             "tiny - Очень быстро (39 MB)",
@@ -497,8 +516,27 @@ class MainWindow(QMainWindow):
         model_layout.addWidget(self.model_combo)
         model_layout.addStretch()
 
+        self.nemo_model_container = QWidget()
+        nemo_layout = QHBoxLayout(self.nemo_model_container)
+        nemo_layout.setContentsMargins(0, 0, 0, 0)
+        nemo_layout.addWidget(QLabel("NeMo модель:"))
+        self.nemo_model_combo = QComboBox()
+        for label, model_name in NEMO_CONFORMER_MODELS:
+            self.nemo_model_combo.addItem(f"{label} ({model_name})", model_name)
+        self.nemo_model_combo.addItem("Custom...", "custom")
+        self.nemo_model_combo.setCurrentIndex(0)
+        nemo_layout.addWidget(self.nemo_model_combo)
+        self.nemo_model_edit = QLineEdit()
+        self.nemo_model_edit.setPlaceholderText("Например: stt_en_conformer_ctc_large")
+        self.nemo_model_edit.setText(NEMO_DEFAULT_MODEL)
+        self.nemo_model_edit.setVisible(False)
+        nemo_layout.addWidget(self.nemo_model_edit)
+        nemo_layout.addStretch()
+
+        basic_layout.addLayout(backend_layout)
         basic_layout.addLayout(lang_layout)
-        basic_layout.addLayout(model_layout)
+        basic_layout.addWidget(self.whisper_model_container)
+        basic_layout.addWidget(self.nemo_model_container)
         basic_group.setLayout(basic_layout)
 
         # Диаризация
@@ -584,7 +622,40 @@ class MainWindow(QMainWindow):
         layout.addWidget(info_group)
         layout.addStretch()
 
+        self.asr_backend_combo.currentIndexChanged.connect(self._on_asr_backend_changed)
+        self.nemo_model_combo.currentIndexChanged.connect(self._on_nemo_model_changed)
+        self._on_asr_backend_changed()
+        self._on_nemo_model_changed()
+
         return widget
+
+    def _current_asr_backend(self) -> str:
+        backend = self.asr_backend_combo.currentData()
+        return backend or "whisper"
+
+    def _current_model_label(self) -> str:
+        backend = self._current_asr_backend()
+        if backend == "nemo":
+            model_name = self._resolve_nemo_model_name()
+            return f"NeMo: {model_name}"
+        return self.model_combo.currentText()
+
+    def _resolve_nemo_model_name(self) -> str:
+        model_name = self.nemo_model_combo.currentData()
+        if model_name == "custom":
+            model_name = self.nemo_model_edit.text().strip()
+        return model_name or NEMO_DEFAULT_MODEL
+
+    def _on_asr_backend_changed(self):
+        backend = self._current_asr_backend()
+        use_whisper = backend == "whisper"
+        self.whisper_model_container.setVisible(use_whisper)
+        self.nemo_model_container.setVisible(not use_whisper)
+        self.download_model_btn.setEnabled(use_whisper)
+
+    def _on_nemo_model_changed(self):
+        is_custom = self.nemo_model_combo.currentData() == "custom"
+        self.nemo_model_edit.setVisible(is_custom)
 
     def _create_logs_tab(self):
         """Создание вкладки логов"""
@@ -813,6 +884,15 @@ class MainWindow(QMainWindow):
 
     def download_model(self):
         """Скачивание модели"""
+        if self._current_asr_backend() != "whisper":
+            QMessageBox.information(
+                self,
+                "Информация",
+                "Скачивание доступно только для Whisper моделей.\n"
+                "NeMo модели загружаются автоматически при первом запуске."
+            )
+            return
+
         model_name = self.model_combo.currentText().split(' - ')[0]
 
         reply = QMessageBox.question(
@@ -875,6 +955,18 @@ class MainWindow(QMainWindow):
         # Настройки
         lang = self.language_combo.currentText().split(' - ')[0]
         model = self.model_combo.currentText().split(' - ')[0]
+        asr_backend = self._current_asr_backend()
+        nemo_model = self._resolve_nemo_model_name()
+
+        if asr_backend == "nemo" and not nemo_model:
+            QMessageBox.warning(self, "Предупреждение", "Укажите имя NeMo модели")
+            self.transcribe_btn.setEnabled(True)
+            self.stop_btn.setEnabled(False)
+            self.select_file_btn.setEnabled(True)
+            self.clear_queue_btn.setEnabled(True)
+            self.remove_selected_btn.setEnabled(True)
+            self._on_asr_backend_changed()
+            return
 
         # Определяем backend диаризации
         diar_backend_text = self.diarization_backend_combo.currentText()
@@ -886,6 +978,8 @@ class MainWindow(QMainWindow):
         settings = {
             'language': lang,
             'model_size': model,
+            'asr_backend': asr_backend,
+            'nemo_model': nemo_model,
             'use_diarization': self.diarization_checkbox.isChecked(),
             'diarization_backend': diar_backend,
             'hf_token': hf_token,
@@ -1121,7 +1215,7 @@ class MainWindow(QMainWindow):
                             'date': datetime.now().isoformat(),
                             'program': f"{APP_NAME} v{APP_VERSION}",
                             'author': AUTHOR,
-                            'model': self.model_combo.currentText(),
+                            'model': self._current_model_label(),
                             'language': self.language_combo.currentText(),
                             'professional_edition': True
                         },

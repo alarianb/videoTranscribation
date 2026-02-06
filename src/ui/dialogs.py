@@ -45,7 +45,7 @@ class AboutDialog(QDialog):
         description = QLabel(
             "Профессиональная программа для транскрибации\n"
             "аудио и видео файлов с диаризацией\n"
-            "спикеров на базе Whisper AI\n\n"
+            "спикеров на базе Whisper или NeMo\n\n"
             "✨ Поддержка множественных файлов\n"
             "✨ Drag & Drop интерфейс\n"
             "✨ Пакетная обработка\n"
@@ -56,7 +56,7 @@ class AboutDialog(QDialog):
         description.setStyleSheet("font-size: 11px; color: #8b949e; margin: 15px;")
 
         # Технологии
-        tech = QLabel("Использует: OpenAI Whisper, PyAnnote, PySide6, PyTorch")
+        tech = QLabel("Использует: OpenAI Whisper, NVIDIA NeMo, PyAnnote, PySide6, PyTorch")
         tech.setAlignment(Qt.AlignmentFlag.AlignCenter)
         tech.setStyleSheet("font-size: 10px; color: #6b7280; margin: 10px;")
 

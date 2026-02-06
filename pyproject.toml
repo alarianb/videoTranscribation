@@ -35,11 +35,13 @@ dependencies = [
 [project.optional-dependencies]
 docx = ["python-docx>=0.8.11"]
 gpu = ["torch>=2.0.0", "torchaudio>=2.0.0"]
+nemo = ["nemo_toolkit[asr]>=1.22.0"]
 dev = ["pyinstaller>=6.0.0", "pytest>=7.0.0"]
 all = [
     "python-docx>=0.8.11",
     "torch>=2.0.0",
     "torchaudio>=2.0.0",
+    "nemo_toolkit[asr]>=1.22.0",
     "pyinstaller>=6.0.0",
 ]
 

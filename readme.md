@@ -1,9 +1,10 @@
 # Audio/Video Transcription Pro (v5.3-PROFESSIONAL)
 
-Профессиональная программа транскрибации с эвристической диаризацией на базе **OpenAI Whisper** (через **faster-whisper / CTranslate2**) и **PySide6**. Обработка выполняется локально, сетевых запросов нет.
+Профессиональная программа транскрибации с эвристической диаризацией на базе **OpenAI Whisper** (через **faster-whisper / CTranslate2**) или **NVIDIA NeMo Conformer** и **PySide6**. Обработка выполняется локально, сетевых запросов нет.
 
 ## Возможности
 - Графический интерфейс: выбор файла, прогресс, статус, логи.
+- ASR движки: Whisper (faster-whisper) или NVIDIA NeMo Conformer.
 - Whisper-модели: `tiny`, `base`, `small`, `medium`, `large-v3`.
 - Язык: `ru`, `en` или автоопределение.
 - VAD и предобработка аудио (FFmpeg + high/low-pass).
@@ -15,7 +16,8 @@
 
 ## Требования
 - Python 3.9–3.11.
-- Обязательно: `faster-whisper`, `PySide6`, установленный FFmpeg (в `PATH` или `ffmpeg.exe` рядом с приложением).
+- Обязательно: `PySide6`, установленный FFmpeg (в `PATH` или `ffmpeg.exe` рядом с приложением).
+- ASR движок (минимум один): `faster-whisper` или `nemo_toolkit[asr]`.
 - Опционально: `PyTorch` (для CUDA/GPU), `python-docx` (DOCX-экспорт), `psutil` (метрики памяти).
 
 ## Установка
@@ -28,6 +30,10 @@ pip install faster-whisper PySide6
 ```bash
 pip install python-docx psutil
 ```
+Для NeMo:
+```bash
+pip install nemo_toolkit[asr]
+```
 
 Для GPU установите подходящую сборку PyTorch под вашу версию CUDA (см. официальную документацию PyTorch).
 
@@ -39,7 +45,7 @@ pip install python-docx psutil
 ```bash
 python transcription_pro.py
 ```
-При первом запуске модели Whisper будут докачаны библиотекой `faster-whisper` в кэш (см. логи и «Информация о системе» в приложении).
+При первом запуске модели Whisper будут докачаны библиотекой `faster-whisper` в кэш. NeMo модели докачиваются автоматически при первом запуске (см. логи и «Информация о системе» в приложении).
 
 ## Использование
 1. Выберите медиа-файл (`.mp4`, `.mkv`, `.avi`, `.mov`, `.webm`, `.mp3`, `.wav`, `.m4a`, `.aac`, `.flac`, `.ogg`).
@@ -54,7 +60,8 @@ python transcription_pro.py
 - Диаризация здесь простая (по паузам). Для точной диаризации нужны спец-модели (в проект не входят).
 
 ## Типичные проблемы
-- «faster_whisper не установлен» — установите пакет `faster-whisper`.
+- «faster_whisper не установлен» — установите пакет `faster-whisper` или выберите NeMo движок.
+- «nemo_toolkit не установлен» — установите пакет `nemo_toolkit[asr]` или выберите Whisper движок.
 - «FFmpeg не найден» — установите FFmpeg или положите `ffmpeg.exe` рядом; проверьте `PATH`.
 - CUDA OOM — используйте меньшую модель или CPU; закройте другие GPU-приложения.
 - Пустой результат — проверьте качество записи и громкость.
@@ -75,4 +82,3 @@ Windows (PowerShell):
 ```
 $env:HUGGING_FACE_HUB_TOKEN="hf_xxx"
 ```
-
