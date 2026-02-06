@@ -23,7 +23,8 @@ from PySide6.QtGui import QTextCursor, QDragEnterEvent, QDropEvent
 
 from ..utils import (
     APP_NAME, APP_VERSION, AUTHOR, SUPPORTED_FORMATS,
-    FASTER_WHISPER_AVAILABLE, DOCX_AVAILABLE, TORCH_AVAILABLE, DEVICE
+    FASTER_WHISPER_AVAILABLE, DOCX_AVAILABLE, TORCH_AVAILABLE, DEVICE,
+    PYANNOTE_AVAILABLE, DEFAULT_HF_TOKEN
 )
 from ..core import get_models_cache_dir, check_ffmpeg
 from ..workers import ModelDownloader, TranscriptionWorker
@@ -507,9 +508,34 @@ class MainWindow(QMainWindow):
         self.diarization_checkbox = QCheckBox("Включить диаризацию спикеров")
         self.diarization_checkbox.setChecked(True)
 
-        info_label = QLabel("Автоматическое определение спикеров (до 10)")
-        info_label.setStyleSheet("color: #56d364; font-size: 11px; margin: 5px 0px;")
-        info_label.setWordWrap(True)
+        # Выбор backend диаризации
+        backend_layout = QHBoxLayout()
+        backend_layout.addWidget(QLabel("Метод:"))
+        self.diarization_backend_combo = QComboBox()
+        self.diarization_backend_combo.addItems([
+            "heuristic - Эвристический (без доп. зависимостей)",
+            "pyannote - Нейросеть (лучшее качество, нужен HF токен)"
+        ])
+        # По умолчанию heuristic, если pyannote недоступен
+        if not PYANNOTE_AVAILABLE:
+            self.diarization_backend_combo.setCurrentIndex(0)
+            self.diarization_backend_combo.setItemData(1, 0, Qt.ItemDataRole.UserRole - 1)  # Disable pyannote
+        backend_layout.addWidget(self.diarization_backend_combo)
+        backend_layout.addStretch()
+
+        # HuggingFace токен для pyannote
+        hf_layout = QHBoxLayout()
+        hf_layout.addWidget(QLabel("HF Token:"))
+        self.hf_token_edit = QTextEdit()
+        self.hf_token_edit.setMaximumHeight(30)
+        self.hf_token_edit.setPlaceholderText("Токен HuggingFace для pyannote (hf_xxx...)")
+        if DEFAULT_HF_TOKEN:
+            self.hf_token_edit.setPlainText(DEFAULT_HF_TOKEN)
+        hf_layout.addWidget(self.hf_token_edit)
+
+        pyannote_status = "✅ Установлен" if PYANNOTE_AVAILABLE else "❌ Не установлен (pip install pyannote-audio)"
+        pyannote_label = QLabel(f"pyannote-audio: {pyannote_status}")
+        pyannote_label.setStyleSheet(f"color: {'#56d364' if PYANNOTE_AVAILABLE else '#f87171'}; font-size: 11px;")
 
         self.show_timestamps_checkbox = QCheckBox("Показывать время каждой реплики")
         self.show_timestamps_checkbox.setChecked(False)
@@ -527,12 +553,14 @@ class MainWindow(QMainWindow):
         self.min_silence_spin.setMinimum(500)
         self.min_silence_spin.setMaximum(3000)
         self.min_silence_spin.setSingleStep(100)
-        self.min_silence_spin.setValue(1000)
+        self.min_silence_spin.setValue(800)
         params_layout.addWidget(self.min_silence_spin)
         params_layout.addStretch()
 
         diarization_layout.addWidget(self.diarization_checkbox)
-        diarization_layout.addWidget(info_label)
+        diarization_layout.addLayout(backend_layout)
+        diarization_layout.addLayout(hf_layout)
+        diarization_layout.addWidget(pyannote_label)
         diarization_layout.addWidget(self.show_timestamps_checkbox)
         diarization_layout.addLayout(params_layout)
         diarization_group.setLayout(diarization_layout)
@@ -665,22 +693,28 @@ class MainWindow(QMainWindow):
                 except:
                     info.append("GPU: Обнаружен")
             else:
-                info.append("Режим: CPU")
+                info.append("Режим: CPU (int8)")
         else:
-            info.append("PyTorch не установлен")
+            info.append("PyTorch не установлен - CPU режим")
 
         ffmpeg_found = check_ffmpeg()
         info.append(f"FFmpeg: {'✅ Найден' if ffmpeg_found else '❌ Не найден'}")
 
+        # Путь к моделям
         cache_dir = get_models_cache_dir()
+        info.append(f"Путь к моделям: {cache_dir}")
         if cache_dir.exists():
-            models = list(cache_dir.glob("*"))
-            info.append(f"Кэш моделей: {len(models)} файлов")
+            # Считаем только директории моделей
+            model_dirs = [d for d in cache_dir.iterdir() if d.is_dir() and d.name.startswith("models--")]
+            info.append(f"Скачано моделей: {len(model_dirs)}")
+
+        # pyannote статус
+        info.append(f"pyannote-audio: {'✅' if PYANNOTE_AVAILABLE else '❌ Не установлен'}")
 
         info.append("Защита от крашей: активна")
         info.append("Множественные файлы: поддерживается")
         info.append("Drag & Drop: активен")
-        info.append("Модульная архитектура: v7.0")
+        info.append(f"Модульная архитектура: v{APP_VERSION}")
 
         self.system_info.setPlainText("\n".join(info))
 
@@ -842,10 +876,19 @@ class MainWindow(QMainWindow):
         lang = self.language_combo.currentText().split(' - ')[0]
         model = self.model_combo.currentText().split(' - ')[0]
 
+        # Определяем backend диаризации
+        diar_backend_text = self.diarization_backend_combo.currentText()
+        diar_backend = "heuristic" if "heuristic" in diar_backend_text else "pyannote"
+
+        # Получаем HF токен
+        hf_token = self.hf_token_edit.toPlainText().strip() or None
+
         settings = {
             'language': lang,
             'model_size': model,
             'use_diarization': self.diarization_checkbox.isChecked(),
+            'diarization_backend': diar_backend,
+            'hf_token': hf_token,
             'min_pause': float(self.min_pause_spin.value()),
             'min_silence': int(self.min_silence_spin.value()),
             'max_speakers': 10,
